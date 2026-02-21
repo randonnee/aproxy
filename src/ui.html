@@ -476,6 +476,17 @@
         word-break: break-all;
       }
 
+      /* Detail: body viewer */
+      .body-viewer {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        white-space: pre-wrap;
+        word-break: break-all;
+        line-height: 1.5;
+        tab-size: 2;
+      }
+
       /* ── Resize handle ── */
       .resize-handle {
         height: 4px;
@@ -612,6 +623,7 @@
             <div class="detail-tab active" data-tab="overview">Overview</div>
             <div class="detail-tab" data-tab="req-headers">Request Headers</div>
             <div class="detail-tab" data-tab="res-headers">Response Headers</div>
+            <div class="detail-tab" data-tab="res-body">Response Body</div>
           </div>
           <div class="detail-content" id="detailContent">
             <div class="detail-empty">Select a request to view details</div>
@@ -788,17 +800,18 @@
       }
 
       function renderSimulators() {
-        if (!simulators.length) {
-          simList.innerHTML = '<div class="sidebar-empty">No simulators</div>';
+        const activeSimulators = simulators.filter(sim => sim.isBooted);
+        if (!activeSimulators.length) {
+          simList.innerHTML = '<div class="sidebar-empty">No active simulators</div>';
           return;
         }
         simList.innerHTML = "";
-        simulators.forEach(sim => {
+        activeSimulators.forEach(sim => {
           const el = document.createElement("div");
           el.className = "sim-entry";
           el.innerHTML = `
             <span class="sim-name">${esc(sim.name)}</span>
-            <span class="sim-badge ${sim.isBooted ? "booted" : ""}">${esc(sim.state)}</span>
+            <span class="sim-badge booted">${esc(sim.state)}</span>
           `;
           simList.appendChild(el);
         });
@@ -877,6 +890,8 @@
           renderHeaders(req?.headers, "Request");
         } else if (activeTab === "res-headers") {
           renderHeaders(res?.headers, "Response");
+        } else if (activeTab === "res-body") {
+          renderBody(res);
         }
       }
 
@@ -911,6 +926,21 @@
         }
         html += "</tbody></table>";
         detailContent.innerHTML = html;
+      }
+
+      function renderBody(res) {
+        if (!res || res.body == null) {
+          detailContent.innerHTML = '<div class="detail-empty">No response body</div>';
+          return;
+        }
+        const contentType = (res.headers && (res.headers["content-type"] || res.headers["Content-Type"])) || "";
+        let formatted = res.body;
+        if (contentType.includes("json")) {
+          try {
+            formatted = JSON.stringify(JSON.parse(res.body), null, 2);
+          } catch {}
+        }
+        detailContent.innerHTML = `<pre class="body-viewer">${esc(formatted)}</pre>`;
       }
 
       function row(label, value) {

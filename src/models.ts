@@ -14,6 +14,7 @@ export type ResponseEvent = {
   headers: Record<string, string>;
   durationMs: number;
   timestamp: number;
+  body?: string;
 };
 
 export type ErrorEvent = {

@@ -38,13 +38,24 @@ export function computeProxyOutcome(
 
     if (ruleResponse) {
       const responseHeaders = new Headers(ruleResponse.headers);
+      // Read the full body so we can include it in the event
+      let bodyText: string | undefined;
+      const bodyBytes = yield* _(
+        Effect.tryPromise(() => ruleResponse.clone().arrayBuffer()).pipe(
+          Effect.catchAll(() => Effect.succeed(undefined))
+        )
+      );
+      if (bodyBytes) {
+        try { bodyText = new TextDecoder().decode(bodyBytes); } catch {}
+      }
       const responseEvent: ProxyEvent = {
         type: "response",
         id,
         status: ruleResponse.status,
         headers: headersToRecord(responseHeaders),
         durationMs: Date.now() - startedAt,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        body: bodyText
       };
       return { response: ruleResponse, event: responseEvent };
     }
@@ -83,17 +94,30 @@ export function computeProxyOutcome(
     const responseHeaders = new Headers(upstreamResponse.headers);
     stripHopByHop(responseHeaders);
 
+    // Read the full body so we can include it in the event and still
+    // return it in the Response for the client.
+    const bodyBytes = yield* _(
+      Effect.tryPromise(() => upstreamResponse.arrayBuffer()).pipe(
+        Effect.mapError((cause) => new ProxyError({ cause }))
+      )
+    );
+    let bodyText: string | undefined;
+    try {
+      bodyText = new TextDecoder().decode(bodyBytes);
+    } catch {}
+
     const responseEvent: ProxyEvent = {
       type: "response",
       id,
       status: upstreamResponse.status,
       headers: headersToRecord(responseHeaders),
       durationMs: Date.now() - startedAt,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      body: bodyText
     };
 
     return {
-      response: new Response(upstreamResponse.body, {
+      response: new Response(bodyBytes, {
         status: upstreamResponse.status,
         headers: responseHeaders
       }),
