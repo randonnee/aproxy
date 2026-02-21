@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Aproxy Control</title>
+    <title>Aproxy</title>
     <style>
       @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
 
@@ -12,684 +12,1023 @@
         --bg-alt: #121a1f;
         --panel: #111920;
         --panel-strong: #18232b;
+        --border: rgba(255, 255, 255, 0.06);
+        --border-strong: rgba(255, 255, 255, 0.1);
         --ink: #e5f1f2;
-        --ink-muted: #9bb0b8;
+        --ink-muted: #8a9da5;
+        --ink-faint: #5a6d75;
         --accent: #47d7ac;
         --accent-strong: #2bc7ff;
         --warn: #ffb84f;
         --error: #ff6b6b;
-        --shadow: rgba(7, 12, 16, 0.4);
-        --radius-lg: 18px;
-        --radius-md: 12px;
-        --radius-sm: 8px;
+        --success: #47d7ac;
+        --sidebar-w: 240px;
+        --detail-h: 320px;
+        --header-h: 44px;
+        --mono: "IBM Plex Mono", ui-monospace, monospace;
+        --sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
       }
 
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
 
       body {
-        font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+        font-family: var(--sans);
         color: var(--ink);
-        min-height: 100vh;
-        background: radial-gradient(circle at top, rgba(71, 215, 172, 0.12), transparent 45%),
-          radial-gradient(circle at 20% 20%, rgba(43, 199, 255, 0.15), transparent 42%),
-          linear-gradient(140deg, #0b1013 10%, #131c22 60%, #0c1216 100%);
+        background: var(--bg);
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
       }
 
-      .page {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 32px 24px 48px;
-        display: grid;
-        gap: 24px;
-      }
-
-      header {
+      /* ── Top bar ── */
+      .topbar {
+        height: var(--header-h);
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 24px;
+        padding: 0 16px;
+        flex-shrink: 0;
+        -webkit-app-region: drag;
       }
-
-      .brand {
+      .topbar-left {
         display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .brand h1 {
-        font-family: "Fraunces", serif;
-        font-size: 34px;
-        letter-spacing: 0.5px;
-      }
-
-      .brand p {
-        color: var(--ink-muted);
-        font-size: 15px;
-      }
-
-      .status-pill {
-        padding: 8px 14px;
-        border-radius: 999px;
-        background: rgba(71, 215, 172, 0.12);
-        color: var(--accent);
-        font-weight: 600;
-        letter-spacing: 0.2px;
-        border: 1px solid rgba(71, 215, 172, 0.3);
-        display: inline-flex;
         align-items: center;
-        gap: 8px;
+        gap: 12px;
       }
-
-      .status-pill span {
-        width: 8px;
-        height: 8px;
+      .topbar h1 {
+        font-family: "Fraunces", serif;
+        font-size: 18px;
+        letter-spacing: 0.3px;
+        font-weight: 700;
+      }
+      .conn-dot {
+        width: 8px; height: 8px;
         border-radius: 50%;
         background: var(--accent);
-        box-shadow: 0 0 10px rgba(71, 215, 172, 0.6);
+        box-shadow: 0 0 8px rgba(71, 215, 172, 0.5);
+        flex-shrink: 0;
+      }
+      .conn-dot.disconnected {
+        background: var(--error);
+        box-shadow: 0 0 8px rgba(255, 107, 107, 0.5);
+      }
+      .topbar-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--ink-muted);
+        -webkit-app-region: no-drag;
+      }
+      .topbar-right .count {
+        font-family: var(--mono);
       }
 
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 20px;
+      /* ── Main layout ── */
+      .main {
+        flex: 1;
+        display: flex;
+        min-height: 0;
       }
 
-      .card {
+      /* ── Sidebar ── */
+      .sidebar {
+        width: var(--sidebar-w);
         background: var(--panel);
-        border-radius: var(--radius-lg);
-        padding: 20px;
-        box-shadow: 0 14px 30px var(--shadow);
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        position: relative;
-        overflow: hidden;
-      }
-
-      .card::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(130deg, rgba(71, 215, 172, 0.06), transparent 55%);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-        pointer-events: none;
-      }
-
-      .card:hover::after {
-        opacity: 1;
-      }
-
-      .card h2 {
-        font-size: 18px;
-        margin-bottom: 14px;
-        letter-spacing: 0.3px;
-      }
-
-      .card h3 {
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 1.4px;
-        color: var(--ink-muted);
-        margin-bottom: 12px;
-      }
-
-      .input-row {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-
-      label {
-        font-size: 13px;
-        color: var(--ink-muted);
+        border-right: 1px solid var(--border);
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        flex: 1 1 140px;
+        flex-shrink: 0;
+        overflow-y: auto;
       }
-
-      input, select {
-        background: var(--bg-alt);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        color: var(--ink);
-        padding: 10px 12px;
-        border-radius: var(--radius-sm);
-        font-family: "Space Grotesk", sans-serif;
-        font-size: 14px;
-      }
-
-      input::placeholder {
-        color: rgba(155, 176, 184, 0.7);
-      }
-
-      .button-row {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        margin-top: 12px;
-      }
-
-      button {
-        background: linear-gradient(120deg, rgba(71, 215, 172, 0.9), rgba(43, 199, 255, 0.8));
-        color: #0c1114;
-        border: none;
-        padding: 10px 16px;
-        border-radius: var(--radius-sm);
-        font-weight: 600;
-        cursor: pointer;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-      }
-
-      button.secondary {
-        background: rgba(255, 255, 255, 0.08);
-        color: var(--ink);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-      }
-
-      button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 8px 20px rgba(43, 199, 255, 0.2);
-      }
-
-      .mono {
-        font-family: "IBM Plex Mono", ui-monospace, monospace;
-        font-size: 12px;
-      }
-
-      .events {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        max-height: 480px;
-        overflow: auto;
-        padding-right: 6px;
-      }
-
-      .event {
+      .sidebar-section {
         padding: 12px;
-        border-radius: var(--radius-md);
-        background: var(--panel-strong);
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        display: grid;
-        gap: 6px;
-        animation: fadeUp 0.3s ease;
+        border-bottom: 1px solid var(--border);
       }
-
-      .event .type {
-        font-size: 12px;
+      .sidebar-section:last-child { border-bottom: none; }
+      .sidebar-title {
+        font-size: 10px;
         font-weight: 600;
-        letter-spacing: 0.8px;
         text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: var(--ink-faint);
+        margin-bottom: 8px;
       }
 
-      .event.request .type {
+      /* Proxy toggle */
+      .proxy-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .proxy-status .label {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .proxy-status .state {
+        font-size: 11px;
+        font-family: var(--mono);
+        padding: 3px 8px;
+        border-radius: 4px;
+      }
+      .proxy-status .state.on {
+        background: rgba(71, 215, 172, 0.15);
         color: var(--accent);
       }
-
-      .event.response .type {
-        color: var(--accent-strong);
-      }
-
-      .event.error .type,
-      .event.simulator_error .type {
-        color: var(--error);
-      }
-
-      .event.rules_list .type,
-      .event.simulators_list .type,
-      .event.simulator_configured .type {
-        color: var(--warn);
-      }
-
-      .event.simulator_warning .type {
-        color: var(--warn);
-      }
-
-      .event .meta {
+      .proxy-status .state.off {
+        background: rgba(255, 255, 255, 0.06);
         color: var(--ink-muted);
-        font-size: 12px;
       }
-
-      .event .payload {
-        font-size: 12px;
-        line-height: 1.5;
-        color: #d0e3e8;
-      }
-
-      .sim-list {
-        display: grid;
-        gap: 10px;
-        max-height: 240px;
-        overflow: auto;
-        padding-right: 6px;
-      }
-
-      .sim-item {
-        display: grid;
+      .proxy-actions {
+        display: flex;
         gap: 6px;
-        padding: 10px;
-        border-radius: var(--radius-md);
-        background: rgba(12, 17, 20, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        margin-top: 8px;
+      }
+      .proxy-actions button {
+        flex: 1;
+      }
+
+      /* Scenario list */
+      .scenario-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
         cursor: pointer;
-        transition: border 0.2s ease, transform 0.2s ease;
+        font-size: 13px;
+        transition: background 0.15s;
+      }
+      .scenario-item:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .scenario-item.active {
+        background: rgba(71, 215, 172, 0.1);
+        color: var(--accent);
+      }
+      .scenario-item .dot {
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: transparent;
+        border: 1px solid var(--ink-faint);
+        flex-shrink: 0;
+      }
+      .scenario-item.active .dot {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .scenario-desc {
+        font-size: 11px;
+        color: var(--ink-faint);
+        margin-left: 14px;
+        margin-top: 2px;
+      }
+      .sidebar-empty {
+        font-size: 12px;
+        color: var(--ink-faint);
+        padding: 4px 0;
+      }
+      .sidebar-btn {
+        display: block;
+        width: 100%;
+        margin-top: 8px;
       }
 
-      .sim-item:hover {
-        border-color: rgba(71, 215, 172, 0.5);
-        transform: translateY(-1px);
-      }
-
-      .sim-item.active {
-        border-color: rgba(43, 199, 255, 0.6);
-        background: rgba(16, 26, 32, 0.9);
-      }
-
-      .sim-item .title {
-        font-weight: 600;
+      /* Simulator list in sidebar */
+      .sim-entry {
+        padding: 6px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.15s;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 8px;
       }
-
-      .badge {
-        font-size: 11px;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
-        color: var(--ink-muted);
+      .sim-entry:hover { background: rgba(255, 255, 255, 0.04); }
+      .sim-entry .sim-name { font-weight: 500; font-size: 13px; }
+      .sim-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--ink-faint);
       }
-
-      .badge.booted {
-        background: rgba(71, 215, 172, 0.18);
+      .sim-badge.booted {
+        background: rgba(71, 215, 172, 0.15);
         color: var(--accent);
       }
 
-      .hint {
+      /* ── Content area ── */
+      .content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      /* ── Toolbar ── */
+      .toolbar {
+        height: 36px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .toolbar input {
+        flex: 1;
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        color: var(--ink);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-family: var(--sans);
         font-size: 12px;
-        color: var(--ink-muted);
-        margin-top: 6px;
+        outline: none;
       }
-
-      .logs {
+      .toolbar input:focus {
+        border-color: rgba(71, 215, 172, 0.4);
+      }
+      .toolbar input::placeholder {
+        color: var(--ink-faint);
+      }
+      .toolbar select {
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        color: var(--ink);
+        padding: 4px 8px;
+        border-radius: 4px;
         font-size: 12px;
+        font-family: var(--sans);
+        outline: none;
+      }
+
+      /* ── Buttons ── */
+      button {
+        background: rgba(255, 255, 255, 0.06);
         color: var(--ink-muted);
-        min-height: 16px;
-        margin-top: 10px;
+        border: 1px solid var(--border);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        font-family: var(--sans);
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        white-space: nowrap;
+      }
+      button:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--ink);
+      }
+      button.primary {
+        background: rgba(71, 215, 172, 0.15);
+        color: var(--accent);
+        border-color: rgba(71, 215, 172, 0.3);
+      }
+      button.primary:hover {
+        background: rgba(71, 215, 172, 0.25);
+      }
+      button.danger {
+        color: var(--error);
+        border-color: rgba(255, 107, 107, 0.25);
+      }
+      button.danger:hover {
+        background: rgba(255, 107, 107, 0.1);
       }
 
-      @keyframes fadeUp {
-        from {
-          opacity: 0;
-          transform: translateY(4px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
+      /* ── Request table ── */
+      .request-list-wrap {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 120px;
+      }
+      .request-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 12px;
+      }
+      .request-table thead {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
+      .request-table th {
+        background: var(--panel-strong);
+        color: var(--ink-faint);
+        font-weight: 600;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        padding: 6px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        user-select: none;
+      }
+      .request-table td {
+        padding: 5px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.025);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .request-table tr {
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .request-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .request-table tbody tr.selected {
+        background: rgba(43, 199, 255, 0.08);
+      }
+      .request-table tbody tr.selected td {
+        color: var(--ink);
+      }
+      .col-method { width: 60px; }
+      .col-status { width: 55px; }
+      .col-host { width: 180px; }
+      .col-path { }
+      .col-duration { width: 70px; text-align: right; }
+      .col-time { width: 75px; text-align: right; }
+
+      /* Method colors */
+      .method { font-weight: 600; }
+      .method-GET { color: var(--accent); }
+      .method-POST { color: var(--accent-strong); }
+      .method-PUT { color: var(--warn); }
+      .method-DELETE { color: var(--error); }
+      .method-PATCH { color: #c49bff; }
+      .method-CONNECT { color: var(--ink-faint); }
+
+      /* Status colors */
+      .status-2xx { color: var(--accent); }
+      .status-3xx { color: var(--accent-strong); }
+      .status-4xx { color: var(--warn); }
+      .status-5xx { color: var(--error); }
+      .status-pending { color: var(--ink-faint); }
+
+      /* ── Detail panel ── */
+      .detail-panel {
+        height: var(--detail-h);
+        border-top: 1px solid var(--border-strong);
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+      }
+      .detail-panel.hidden {
+        display: none;
+      }
+      .detail-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        background: var(--panel-strong);
+      }
+      .detail-tab {
+        padding: 7px 14px;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--ink-faint);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: color 0.15s, border-color 0.15s;
+        user-select: none;
+      }
+      .detail-tab:hover { color: var(--ink-muted); }
+      .detail-tab.active {
+        color: var(--ink);
+        border-bottom-color: var(--accent);
+      }
+      .detail-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 16px;
+      }
+      .detail-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--ink-faint);
+        font-size: 13px;
       }
 
-      @media (max-width: 720px) {
-        header {
-          flex-direction: column;
-          align-items: flex-start;
-        }
+      /* Detail: overview */
+      .overview-grid {
+        display: grid;
+        grid-template-columns: 100px 1fr;
+        gap: 4px 12px;
+        font-size: 12px;
+      }
+      .overview-grid .label {
+        color: var(--ink-faint);
+        font-weight: 500;
+        text-align: right;
+      }
+      .overview-grid .value {
+        color: var(--ink);
+        font-family: var(--mono);
+        word-break: break-all;
+      }
 
-        .events {
-          max-height: 360px;
-        }
+      /* Detail: headers table */
+      .headers-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .headers-table th {
+        text-align: left;
+        color: var(--ink-faint);
+        font-weight: 600;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .headers-table td {
+        padding: 3px 8px;
+        border-bottom: 1px solid rgba(255,255,255,0.02);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .headers-table td:first-child {
+        color: var(--accent-strong);
+        width: 220px;
+        white-space: nowrap;
+      }
+      .headers-table td:last-child {
+        color: var(--ink-muted);
+        word-break: break-all;
+      }
+
+      /* ── Resize handle ── */
+      .resize-handle {
+        height: 4px;
+        cursor: ns-resize;
+        background: transparent;
+        position: relative;
+        flex-shrink: 0;
+      }
+      .resize-handle:hover,
+      .resize-handle.dragging {
+        background: rgba(71, 215, 172, 0.2);
+      }
+
+      /* ── Scrollbar ── */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.1);
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255,255,255,0.18);
+      }
+
+      /* ── Empty state ── */
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--ink-faint);
+        gap: 8px;
+        font-size: 13px;
+      }
+      .empty-state .icon {
+        font-size: 32px;
+        opacity: 0.3;
       }
     </style>
   </head>
   <body>
-    <div class="page">
-      <header>
-        <div class="brand">
-          <h1>Aproxy Control</h1>
-          <p>Live event stream + simulator proxy management</p>
-        </div>
-        <div class="status-pill" id="statusPill"><span></span> Connected</div>
-      </header>
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="conn-dot" id="connDot"></div>
+        <h1>Aproxy</h1>
+      </div>
+      <div class="topbar-right">
+        <span class="count" id="reqCount">0 requests</span>
+        <button id="clearBtn">Clear</button>
+      </div>
+    </div>
 
-      <section class="grid">
-        <div class="card">
-          <h2>System Proxy</h2>
-          <div class="input-row">
-            <label>
-              Proxy Host
-              <input id="proxyHost" placeholder="Auto" />
-            </label>
-            <label>
-              Proxy Port
-              <input id="proxyPort" type="number" placeholder="8080" value="8080" />
-            </label>
+    <div class="main">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <!-- Proxy status -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">System Proxy</div>
+          <div class="proxy-status">
+            <span class="label">Proxy</span>
+            <span class="state off" id="proxyState">OFF</span>
           </div>
-          <div class="button-row">
-            <button id="enableProxy">Enable Proxy</button>
-            <button class="secondary" id="disableProxy">Disable Proxy</button>
-            <button class="secondary" id="checkProxy">Check Status</button>
+          <div class="proxy-actions">
+            <button class="primary" id="enableProxyBtn">Enable</button>
+            <button id="disableProxyBtn">Disable</button>
           </div>
-          <div class="hint" id="proxyStatusHint">Applies to all traffic on this machine (including simulators).</div>
         </div>
 
-        <div class="card">
-          <h2>Simulator Fleet</h2>
-          <div class="button-row">
-            <button class="secondary" id="refreshSimulators">Refresh simulators</button>
+        <!-- Scenarios -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Scenarios</div>
+          <div id="scenarioList">
+            <div class="sidebar-empty">No scenarios loaded</div>
           </div>
-          <div class="sim-list" id="simList"></div>
-          <div class="hint">Select a booted simulator to install certs.</div>
+          <button class="sidebar-btn" id="reloadRulesBtn">Reload Rules</button>
         </div>
 
-        <div class="card">
-          <h2>Certificate Install</h2>
-          <div class="input-row">
-            <label>
-              Selected Simulator
-              <input id="selectedSimulatorCert" placeholder="Pick a simulator" disabled />
-            </label>
-            <label>
-              Cert Path
-              <input id="certPath" placeholder="/absolute/path/to/ca.pem" />
-            </label>
+        <!-- Simulators -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Simulators</div>
+          <div id="simList">
+            <div class="sidebar-empty">No simulators</div>
           </div>
-          <div class="button-row">
-            <button id="installCert">Install Certificate</button>
-          </div>
-          <div class="hint">Requires a booted simulator and a valid absolute file path.</div>
+          <button class="sidebar-btn" id="refreshSimBtn">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="content">
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <input type="text" id="searchInput" placeholder="Filter by URL, method, status..." />
+          <select id="methodFilter">
+            <option value="all">All Methods</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="DELETE">DELETE</option>
+            <option value="PATCH">PATCH</option>
+            <option value="CONNECT">CONNECT</option>
+          </select>
         </div>
 
-        <div class="card">
-          <h2>Event Stream</h2>
-          <div class="input-row">
-            <label>
-              Filter Types
-              <select id="eventFilter">
-                <option value="all">All events</option>
-                <option value="request">request</option>
-                <option value="response">response</option>
-                <option value="error">error</option>
-                <option value="rules_list">rules_list</option>
-                <option value="simulators_list">simulators_list</option>
-                <option value="simulator_configured">simulator_configured</option>
-                <option value="simulator_error">simulator_error</option>
-              </select>
-            </label>
-            <label>
-              Search
-              <input id="eventSearch" placeholder="/api/users or status 500" />
-            </label>
+        <!-- Request list -->
+        <div class="request-list-wrap" id="requestListWrap">
+          <table class="request-table">
+            <thead>
+              <tr>
+                <th class="col-method">Method</th>
+                <th class="col-status">Status</th>
+                <th class="col-host">Host</th>
+                <th class="col-path">Path</th>
+                <th class="col-duration">Time</th>
+                <th class="col-time">Clock</th>
+              </tr>
+            </thead>
+            <tbody id="requestBody"></tbody>
+          </table>
+          <div class="empty-state" id="emptyState">
+            <div class="icon">~</div>
+            <div>No requests captured yet</div>
+            <div style="font-size:11px">Configure your system proxy and start browsing</div>
           </div>
-          <div class="button-row">
-            <button class="secondary" id="clearEvents">Clear events</button>
-          </div>
-          <div class="events" id="eventList"></div>
-          <div class="logs" id="eventLog"></div>
         </div>
-      </section>
+
+        <!-- Resize handle -->
+        <div class="resize-handle" id="resizeHandle"></div>
+
+        <!-- Detail panel -->
+        <div class="detail-panel hidden" id="detailPanel">
+          <div class="detail-tabs">
+            <div class="detail-tab active" data-tab="overview">Overview</div>
+            <div class="detail-tab" data-tab="req-headers">Request Headers</div>
+            <div class="detail-tab" data-tab="res-headers">Response Headers</div>
+          </div>
+          <div class="detail-content" id="detailContent">
+            <div class="detail-empty">Select a request to view details</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-      const eventList = document.getElementById("eventList");
-      const eventFilter = document.getElementById("eventFilter");
-      const eventSearch = document.getElementById("eventSearch");
-      const eventLog = document.getElementById("eventLog");
-      const statusPill = document.getElementById("statusPill");
-      const proxyStatusHint = document.getElementById("proxyStatusHint");
-      const simList = document.getElementById("simList");
-      const refreshSimulators = document.getElementById("refreshSimulators");
-      const selectedSimulatorCert = document.getElementById("selectedSimulatorCert");
-      const proxyHost = document.getElementById("proxyHost");
-      const proxyPort = document.getElementById("proxyPort");
-      const enableProxy = document.getElementById("enableProxy");
-      const disableProxy = document.getElementById("disableProxy");
-      const checkProxy = document.getElementById("checkProxy");
-      const certPath = document.getElementById("certPath");
-      const installCert = document.getElementById("installCert");
-
-      const maxEvents = 200;
-      let events = [];
+      // ── State ──
+      const requests = new Map(); // id -> { request?, response?, error? }
+      let orderedIds = [];
+      let selectedId = null;
+      let activeTab = "overview";
+      let connected = false;
+      let scenarios = [];
+      let activeScenarioId = null;
       let simulators = [];
-      let selectedUdid = "";
 
-      const formatTime = (ts) => new Date(ts).toLocaleTimeString();
+      // ── DOM refs ──
+      const connDot = document.getElementById("connDot");
+      const reqCount = document.getElementById("reqCount");
+      const clearBtn = document.getElementById("clearBtn");
+      const searchInput = document.getElementById("searchInput");
+      const methodFilter = document.getElementById("methodFilter");
+      const requestBody = document.getElementById("requestBody");
+      const emptyState = document.getElementById("emptyState");
+      const requestListWrap = document.getElementById("requestListWrap");
+      const detailPanel = document.getElementById("detailPanel");
+      const detailContent = document.getElementById("detailContent");
+      const scenarioList = document.getElementById("scenarioList");
+      const simList = document.getElementById("simList");
+      const proxyState = document.getElementById("proxyState");
+      const enableProxyBtn = document.getElementById("enableProxyBtn");
+      const disableProxyBtn = document.getElementById("disableProxyBtn");
+      const reloadRulesBtn = document.getElementById("reloadRulesBtn");
+      const refreshSimBtn = document.getElementById("refreshSimBtn");
+      const resizeHandle = document.getElementById("resizeHandle");
+      const detailTabs = document.querySelectorAll(".detail-tab");
 
-      const setStatus = (connected) => {
-        statusPill.innerHTML = connected
-          ? "<span></span> Connected"
-          : "<span style=\"background:#ff6b6b;box-shadow:0 0 10px rgba(255,107,107,0.6)\"></span> Disconnected";
-      };
+      // ── Helpers ──
+      const maxRequests = 500;
 
-      const updateSimulatorList = () => {
-        simList.innerHTML = "";
-        if (!simulators.length) {
-          simList.innerHTML = "<div class=\"hint\">No simulators found.</div>";
-          return;
-        }
-        simulators.forEach((sim) => {
-          const item = document.createElement("div");
-          item.className = "sim-item" + (sim.udid === selectedUdid ? " active" : "");
-          item.innerHTML = `
-            <div class="title">
-              <span>${sim.name}</span>
-              <span class="badge ${sim.isBooted ? "booted" : ""}">${sim.state}</span>
-            </div>
-            <div class="mono">${sim.runtime}</div>
-            <div class="mono">${sim.udid}</div>
-          `;
-          item.addEventListener("click", () => {
-            selectedUdid = sim.udid;
-            selectedSimulatorCert.value = `${sim.name} (${sim.state})`;
-            updateSimulatorList();
-          });
-          simList.appendChild(item);
-        });
-      };
-
-      const renderEvents = () => {
-        const filterType = eventFilter.value;
-        const search = eventSearch.value.trim().toLowerCase();
-        eventList.innerHTML = "";
-
-        const filtered = events.filter((evt) => {
-          if (filterType !== "all" && evt.type !== filterType) return false;
-          if (!search) return true;
-          return JSON.stringify(evt).toLowerCase().includes(search);
-        });
-
-        filtered.slice(0, maxEvents).forEach((evt) => {
-          const card = document.createElement("div");
-          card.className = `event ${evt.type}`;
-          const time = evt.timestamp ? formatTime(evt.timestamp) : "";
-          let detail = "";
-          if (evt.type === "request") detail = `${evt.method} ${evt.url}`;
-          if (evt.type === "response") detail = `Status ${evt.status} in ${evt.durationMs}ms`;
-          if (evt.type === "error" || evt.type === "simulator_error") detail = evt.message;
-          if (evt.type === "simulator_configured") {
-            if (evt.certPath) {
-              detail = `Installed cert ${evt.certPath} on ${evt.simulator?.name ?? "simulator"}`;
-            } else {
-              detail = `Configured ${evt.simulator?.name ?? "simulator"} ${evt.proxyHost}:${evt.proxyPort}`;
-            }
-          }
-          if (evt.type === "simulators_list") detail = `Simulators: ${evt.simulators?.length ?? 0}`;
-          if (evt.type === "rules_list") detail = `Rules: ${evt.rules?.length ?? 0}`;
-          card.innerHTML = `
-            <div class="type">${evt.type}</div>
-            <div class="meta">${time}</div>
-            <div class="payload mono">${detail}</div>
-          `;
-          eventList.appendChild(card);
-        });
-        eventLog.textContent = `${filtered.length} events shown`;
-      };
-
-      const addEvent = (evt) => {
-        events.unshift(evt);
-        if (events.length > maxEvents) events = events.slice(0, maxEvents);
-        renderEvents();
-      };
-
-      const fetchSimulators = async () => {
+      function parseUrl(urlStr) {
         try {
-          const res = await fetch("/simulators");
-          const payload = await res.json();
-          simulators = payload.simulators ?? [];
-          updateSimulatorList();
-        } catch (err) {
-          addEvent({
-            type: "simulator_error",
-            message: "Failed to load simulators",
-            timestamp: Date.now()
-          });
+          const u = new URL(urlStr);
+          return { host: u.host, path: u.pathname + u.search };
+        } catch {
+          return { host: "", path: urlStr };
         }
-      };
+      }
 
-      refreshSimulators.addEventListener("click", fetchSimulators);
+      function formatTime(ts) {
+        return new Date(ts).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
 
-      const ensureProxyHost = async () => {
-        if (proxyHost.value.trim()) return proxyHost.value.trim();
+      function statusClass(status) {
+        if (!status) return "status-pending";
+        if (status < 300) return "status-2xx";
+        if (status < 400) return "status-3xx";
+        if (status < 500) return "status-4xx";
+        return "status-5xx";
+      }
+
+      // ── Connection status ──
+      function setConnected(val) {
+        connected = val;
+        connDot.className = "conn-dot" + (val ? "" : " disconnected");
+      }
+
+      // ── Proxy status ──
+      function updateProxyState(enabled) {
+        proxyState.textContent = enabled ? "ON" : "OFF";
+        proxyState.className = "state " + (enabled ? "on" : "off");
+      }
+
+      async function getPreferredHost() {
         try {
           const res = await fetch("/host");
-          const payload = await res.json();
-          if (payload.host) {
-            proxyHost.value = payload.host;
-            return payload.host;
-          }
-        } catch (err) {
-          // ignore
-        }
-        return "127.0.0.1";
-      };
+          const data = await res.json();
+          return data.host || "127.0.0.1";
+        } catch { return "127.0.0.1"; }
+      }
 
-      const updateProxyStatusHint = (enabled) => {
-        proxyStatusHint.textContent = enabled
-          ? "System proxy is ON. All traffic on this machine routes through the proxy."
-          : "System proxy is OFF.";
-        proxyStatusHint.style.color = enabled ? "var(--accent)" : "var(--ink-muted)";
-      };
-
-      enableProxy.addEventListener("click", async () => {
+      enableProxyBtn.addEventListener("click", async () => {
         try {
-          const host = await ensureProxyHost();
+          const host = await getPreferredHost();
           const res = await fetch("/proxy/enable", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              proxyHost: host,
-              proxyPort: Number(proxyPort.value)
-            })
+            body: JSON.stringify({ proxyHost: host, proxyPort: 8080 })
           });
-          const payload = await res.json();
-          updateProxyStatusHint(payload.enabled);
-          addEvent({
-            type: "simulator_configured",
-            simulator: { name: payload.networkService },
-            proxyHost: payload.proxyHost,
-            proxyPort: payload.proxyPort,
-            timestamp: Date.now()
-          });
-        } catch (err) {
-          addEvent({ type: "simulator_error", message: "Failed to enable proxy", timestamp: Date.now() });
-        }
+          const data = await res.json();
+          updateProxyState(data.enabled);
+        } catch {}
       });
 
-      disableProxy.addEventListener("click", async () => {
+      disableProxyBtn.addEventListener("click", async () => {
         try {
           const res = await fetch("/proxy/disable", { method: "POST" });
-          const payload = await res.json();
-          updateProxyStatusHint(payload.enabled);
-          addEvent({
-            type: "simulator_configured",
-            simulator: { name: payload.networkService },
-            proxyHost: "disabled",
-            proxyPort: 0,
-            timestamp: Date.now()
-          });
-        } catch (err) {
-          addEvent({ type: "simulator_error", message: "Failed to disable proxy", timestamp: Date.now() });
-        }
+          const data = await res.json();
+          updateProxyState(data.enabled);
+        } catch {}
       });
 
-      checkProxy.addEventListener("click", async () => {
+      // ── Scenarios ──
+      async function fetchScenarios() {
         try {
-          const res = await fetch("/proxy/status");
-          const payload = await res.json();
-          updateProxyStatusHint(payload.enabled);
-          addEvent({
-            type: "simulator_configured",
-            simulator: { name: payload.networkService },
-            proxyHost: payload.enabled ? (payload.settings?.HTTPServer ?? "unknown") : "disabled",
-            proxyPort: payload.enabled ? Number(payload.settings?.HTTPPort ?? 0) : 0,
-            timestamp: Date.now()
-          });
-        } catch (err) {
-          addEvent({ type: "simulator_error", message: "Failed to check proxy status", timestamp: Date.now() });
-        }
-      });
+          const res = await fetch("/scenarios");
+          const data = await res.json();
+          scenarios = data.scenarios || [];
+          activeScenarioId = data.activeScenarioId;
+          renderScenarios();
+        } catch {}
+      }
 
-      installCert.addEventListener("click", async () => {
-        if (!selectedUdid) return addEvent({ type: "simulator_error", message: "Pick a simulator", timestamp: Date.now() });
-        if (!certPath.value) {
-          return addEvent({ type: "simulator_error", message: "Cert path is required", timestamp: Date.now() });
+      function renderScenarios() {
+        if (!scenarios.length) {
+          scenarioList.innerHTML = '<div class="sidebar-empty">No scenarios loaded</div>';
+          return;
         }
+        scenarioList.innerHTML = "";
+        // "None" option
+        const noneEl = document.createElement("div");
+        noneEl.className = "scenario-item" + (activeScenarioId === null ? " active" : "");
+        noneEl.innerHTML = '<div class="dot"></div><span>None (passthrough)</span>';
+        noneEl.addEventListener("click", () => setActiveScenario(null));
+        scenarioList.appendChild(noneEl);
+
+        scenarios.forEach(s => {
+          const el = document.createElement("div");
+          el.className = "scenario-item" + (s.id === activeScenarioId ? " active" : "");
+          el.innerHTML = `<div class="dot"></div><span>${esc(s.name || s.id)}</span>`;
+          el.addEventListener("click", () => setActiveScenario(s.id));
+          scenarioList.appendChild(el);
+          if (s.description) {
+            const desc = document.createElement("div");
+            desc.className = "scenario-desc";
+            desc.textContent = s.description;
+            scenarioList.appendChild(desc);
+          }
+        });
+      }
+
+      async function setActiveScenario(id) {
         try {
-          const res = await fetch("/simulators/certs", {
-            method: "POST",
+          const res = await fetch("/scenarios/active", {
+            method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ udid: selectedUdid, certPath: certPath.value })
+            body: JSON.stringify({ scenarioId: id })
           });
-          const payload = await res.json();
-          addEvent({
-            type: "simulator_configured",
-            simulator: payload.simulator,
-            proxyHost: "",
-            proxyPort: 0,
-            certPath: payload.certPath,
-            timestamp: Date.now()
-          });
-        } catch (err) {
-          addEvent({ type: "simulator_error", message: "Cert install failed", timestamp: Date.now() });
+          const data = await res.json();
+          scenarios = data.scenarios || scenarios;
+          activeScenarioId = data.activeScenarioId;
+          renderScenarios();
+        } catch {}
+      }
+
+      reloadRulesBtn.addEventListener("click", async () => {
+        try {
+          await fetch("/rules/reload", { method: "POST" });
+          await fetchScenarios();
+        } catch {}
+      });
+
+      // ── Simulators ──
+      async function fetchSimulators() {
+        try {
+          const res = await fetch("/simulators");
+          const data = await res.json();
+          simulators = data.simulators || [];
+          renderSimulators();
+        } catch {}
+      }
+
+      function renderSimulators() {
+        if (!simulators.length) {
+          simList.innerHTML = '<div class="sidebar-empty">No simulators</div>';
+          return;
         }
+        simList.innerHTML = "";
+        simulators.forEach(sim => {
+          const el = document.createElement("div");
+          el.className = "sim-entry";
+          el.innerHTML = `
+            <span class="sim-name">${esc(sim.name)}</span>
+            <span class="sim-badge ${sim.isBooted ? "booted" : ""}">${esc(sim.state)}</span>
+          `;
+          simList.appendChild(el);
+        });
+      }
+
+      refreshSimBtn.addEventListener("click", fetchSimulators);
+
+      // ── Request list rendering ──
+      function getFilteredIds() {
+        const search = searchInput.value.trim().toLowerCase();
+        const method = methodFilter.value;
+        return orderedIds.filter(id => {
+          const entry = requests.get(id);
+          if (!entry || !entry.request) return false;
+          if (method !== "all" && entry.request.method !== method) return false;
+          if (search) {
+            const haystack = `${entry.request.method} ${entry.request.url} ${entry.response?.status || ""}`.toLowerCase();
+            if (!haystack.includes(search)) return false;
+          }
+          return true;
+        });
+      }
+
+      function renderRequestList() {
+        const ids = getFilteredIds();
+        requestBody.innerHTML = "";
+        emptyState.style.display = ids.length ? "none" : "flex";
+        reqCount.textContent = `${orderedIds.length} request${orderedIds.length !== 1 ? "s" : ""}`;
+
+        ids.forEach(id => {
+          const entry = requests.get(id);
+          const req = entry.request;
+          const res = entry.response;
+          const err = entry.error;
+          const { host, path } = parseUrl(req.url);
+          const status = res ? res.status : (err ? "ERR" : "...");
+          const duration = res ? `${res.durationMs}ms` : (err ? "err" : "");
+          const time = formatTime(req.timestamp);
+
+          const tr = document.createElement("tr");
+          tr.dataset.id = id;
+          if (id === selectedId) tr.classList.add("selected");
+          tr.innerHTML = `
+            <td class="col-method"><span class="method method-${esc(req.method)}">${esc(req.method)}</span></td>
+            <td class="col-status"><span class="${typeof status === 'number' ? statusClass(status) : (err ? 'status-5xx' : 'status-pending')}">${status}</span></td>
+            <td class="col-host">${esc(host)}</td>
+            <td class="col-path">${esc(path)}</td>
+            <td class="col-duration" style="text-align:right">${duration}</td>
+            <td class="col-time" style="text-align:right">${time}</td>
+          `;
+          tr.addEventListener("click", () => selectRequest(id));
+          requestBody.appendChild(tr);
+        });
+      }
+
+      // ── Selection & detail ──
+      function selectRequest(id) {
+        selectedId = id;
+        detailPanel.classList.remove("hidden");
+        renderRequestList();
+        renderDetail();
+      }
+
+      function renderDetail() {
+        if (!selectedId || !requests.has(selectedId)) {
+          detailContent.innerHTML = '<div class="detail-empty">Select a request to view details</div>';
+          return;
+        }
+        const entry = requests.get(selectedId);
+        const req = entry.request;
+        const res = entry.response;
+
+        if (activeTab === "overview") {
+          renderOverview(req, res, entry.error);
+        } else if (activeTab === "req-headers") {
+          renderHeaders(req?.headers, "Request");
+        } else if (activeTab === "res-headers") {
+          renderHeaders(res?.headers, "Response");
+        }
+      }
+
+      function renderOverview(req, res, err) {
+        if (!req) { detailContent.innerHTML = '<div class="detail-empty">No data</div>'; return; }
+        const { host, path } = parseUrl(req.url);
+        let html = '<div class="overview-grid">';
+        html += row("Method", req.method);
+        html += row("URL", req.url);
+        html += row("Host", host);
+        html += row("Path", path);
+        html += row("Time", formatTime(req.timestamp));
+        if (res) {
+          html += row("Status", res.status);
+          html += row("Duration", res.durationMs + "ms");
+        }
+        if (err) {
+          html += row("Error", err.message);
+        }
+        html += "</div>";
+        detailContent.innerHTML = html;
+      }
+
+      function renderHeaders(headers, label) {
+        if (!headers || !Object.keys(headers).length) {
+          detailContent.innerHTML = `<div class="detail-empty">No ${label.toLowerCase()} headers</div>`;
+          return;
+        }
+        let html = '<table class="headers-table"><thead><tr><th>Header</th><th>Value</th></tr></thead><tbody>';
+        for (const [key, val] of Object.entries(headers)) {
+          html += `<tr><td>${esc(key)}</td><td>${esc(val)}</td></tr>`;
+        }
+        html += "</tbody></table>";
+        detailContent.innerHTML = html;
+      }
+
+      function row(label, value) {
+        return `<div class="label">${esc(label)}</div><div class="value">${esc(String(value ?? ""))}</div>`;
+      }
+
+      function esc(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      // Tab switching
+      detailTabs.forEach(tab => {
+        tab.addEventListener("click", () => {
+          detailTabs.forEach(t => t.classList.remove("active"));
+          tab.classList.add("active");
+          activeTab = tab.dataset.tab;
+          renderDetail();
+        });
       });
 
-      document.getElementById("clearEvents").addEventListener("click", () => {
-        events = [];
-        renderEvents();
-      });
+      // ── Event processing ──
+      function processEvent(evt) {
+        if (evt.type === "request") {
+          const entry = requests.get(evt.id) || {};
+          entry.request = evt;
+          requests.set(evt.id, entry);
+          if (!orderedIds.includes(evt.id)) {
+            orderedIds.unshift(evt.id);
+          }
+          // Trim
+          if (orderedIds.length > maxRequests) {
+            const removed = orderedIds.splice(maxRequests);
+            removed.forEach(id => requests.delete(id));
+          }
+          renderRequestList();
+        } else if (evt.type === "response") {
+          const entry = requests.get(evt.id);
+          if (entry) {
+            entry.response = evt;
+            renderRequestList();
+            if (selectedId === evt.id) renderDetail();
+          }
+        } else if (evt.type === "error") {
+          const entry = requests.get(evt.id);
+          if (entry) {
+            entry.error = evt;
+            renderRequestList();
+            if (selectedId === evt.id) renderDetail();
+          }
+        } else if (evt.type === "rules_list") {
+          // Refresh scenarios view
+          fetchScenarios();
+        } else if (evt.type === "simulators_list") {
+          simulators = evt.simulators || [];
+          renderSimulators();
+        }
+      }
 
-      eventFilter.addEventListener("change", renderEvents);
-      eventSearch.addEventListener("input", renderEvents);
-
-      const startEvents = () => {
+      // ── SSE ──
+      function startSSE() {
         const source = new EventSource("/events");
-        setStatus(true);
+        source.onopen = () => setConnected(true);
         source.onmessage = (msg) => {
           try {
             const evt = JSON.parse(msg.data);
-            if (evt.type === "simulators_list") {
-              simulators = evt.simulators ?? simulators;
-              updateSimulatorList();
-            }
-            addEvent(evt);
-          } catch (err) {
-            addEvent({ type: "error", message: "Malformed event payload", timestamp: Date.now() });
-          }
+            processEvent(evt);
+          } catch {}
         };
         source.onerror = () => {
-          setStatus(false);
+          setConnected(false);
         };
-      };
+      }
 
-      // Auto-populate proxy host and check initial proxy status on load
-      ensureProxyHost();
-      fetch("/proxy/status").then(r => r.json()).then(p => updateProxyStatusHint(p.enabled)).catch(() => {});
+      // ── Filter events ──
+      searchInput.addEventListener("input", renderRequestList);
+      methodFilter.addEventListener("change", renderRequestList);
+
+      // ── Clear ──
+      clearBtn.addEventListener("click", () => {
+        requests.clear();
+        orderedIds = [];
+        selectedId = null;
+        detailPanel.classList.add("hidden");
+        renderRequestList();
+      });
+
+      // ── Resize handle ──
+      let resizing = false;
+      resizeHandle.addEventListener("mousedown", (e) => {
+        resizing = true;
+        resizeHandle.classList.add("dragging");
+        document.body.style.cursor = "ns-resize";
+        document.body.style.userSelect = "none";
+        e.preventDefault();
+      });
+      document.addEventListener("mousemove", (e) => {
+        if (!resizing) return;
+        const contentRect = document.querySelector(".content").getBoundingClientRect();
+        const newHeight = contentRect.bottom - e.clientY;
+        const clamped = Math.max(100, Math.min(newHeight, contentRect.height - 100));
+        detailPanel.style.height = clamped + "px";
+      });
+      document.addEventListener("mouseup", () => {
+        if (resizing) {
+          resizing = false;
+          resizeHandle.classList.remove("dragging");
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+        }
+      });
+
+      // ── Init ──
+      fetch("/proxy/status").then(r => r.json()).then(p => updateProxyState(p.enabled)).catch(() => {});
+      fetchScenarios();
       fetchSimulators();
-      startEvents();
+      startSSE();
     </script>
   </body>
 </html>
