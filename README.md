@@ -1,6 +1,6 @@
 # aproxy
 
-Local HTTP/HTTPS proxy built with Bun. Intercepts traffic on macOS with MITM SSL decryption, displays requests in a web UI, and supports rule-based response mocking.
+Local HTTP/HTTPS proxy built with Bun. Intercepts traffic on macOS with MITM SSL decryption, displays requests in a React web UI, and supports rule-based response mocking.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handle
 - **HTTP requests** are parsed and dispatched through an Effect-based route handler (control routes and upstream proxy).
 - **CONNECT requests** are intercepted via MITM: an ephemeral TLS server is started with a per-host certificate signed by the auto-generated CA. Decrypted traffic flows through the same proxy/rules pipeline as HTTP and appears in the web UI. A blind tunnel fallback is used when no CA is configured.
 
-Key source files:
+### Backend (`src/`)
 
 - `src/index.ts` — entry point, wires dependencies
 - `src/tcpProxy.ts` — raw TCP listener, HTTP parsing, CONNECT detection
@@ -39,15 +39,37 @@ Key source files:
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config, CA trust. All functions return `Effect<T, CommandError>`
 - `src/eventBus.ts` — generic pub/sub for SSE events
 - `src/models.ts` — TypeScript event/model types
-- `src/rules.ts` — rule type definitions
-- `src/rulesLoader.ts` — rule file loading and hot-reload watching
+- `src/rules.ts` — rule and view type definitions (`ScenarioFactory`, `ViewFactory`, etc.)
+- `src/rulesLoader.ts` — scenario and view file loading from separate directories, hot-reload watching
 - `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
-- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save
-- `src/ui.html` — single-page web UI
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId` and `theme`
+- `src/ui.html` — legacy single-page web UI (fallback if React build is missing)
 
-## Web UI
+### Web UI (`ui/`)
 
-Open `http://localhost:8080` in a browser to see proxied requests in real time.
+The web UI is a React + TypeScript app built with Vite, served from `ui/dist/` by the backend. Open `http://localhost:8080` in a browser to see proxied requests in real time.
+
+During development, run `npm run dev` in `ui/` for the Vite dev server on port 3000 with hot-reload. After changes, run `npm run build` in `ui/` to update the dist served by the backend.
+
+Key files:
+
+- `ui/src/App.tsx` — root component, layout shell
+- `ui/src/stores/appStore.ts` — Zustand store for app state
+- `ui/src/hooks/useSSE.ts` — SSE connection hook
+- `ui/src/hooks/useInitialData.ts` — fetches initial data on mount
+- `ui/src/lib/api.ts` — API client functions for all backend endpoints
+- `ui/src/styles/global.css` — all styles (CSS variables, dark/light themes)
+- `ui/src/components/Sidebar/` — sidebar sections (proxy toggle, scenarios, views, simulators, CA cert)
+- `ui/src/components/RequestTable/` — request list table with resizable columns
+- `ui/src/components/DetailPanel/` — request detail panel (overview, headers, body tabs)
+
+### Runtime directory (`~/.aproxy/`)
+
+- `~/.aproxy/ca.pem` — auto-generated CA certificate
+- `~/.aproxy/ca-key.pem` — CA private key
+- `~/.aproxy/config.json` — user config (defaultViewId, theme)
+- `~/.aproxy/scenarios/` — user scenario files (loaded at runtime)
+- `~/.aproxy/views/` — user view files (loaded at runtime)
 
 ## Events (SSE)
 
@@ -74,9 +96,13 @@ Endpoints:
 - `POST /proxy/disable` — disable the proxy
 - `GET /proxy/status` — read current proxy settings
 
-## Rule control (REST)
+## Scenarios
 
-Scenarios are loaded from `rules/*.ts`. Only the active scenario's rules are evaluated, in order. The first matching rule wins.
+Scenarios are loaded from `~/.aproxy/scenarios/*.ts` (or `.js`). Each file exports `scenarios: ScenarioFactory[]`. Only the active scenario's rules are evaluated, in order. The first matching rule wins.
+
+Scenarios can be imported from the web UI sidebar by clicking the `+` button next to the "Scenarios" header, which opens a native file picker.
+
+Bundled examples are available in `examples/scenarios/` and can be imported via the API.
 
 Endpoints:
 
@@ -84,6 +110,102 @@ Endpoints:
 - `PUT /scenarios/active` — set the active scenario id
 - `GET /rules` — list rules for the active scenario
 - `POST /rules/reload` — reload scenario files from disk
+- `POST /scenarios/import` — upload a scenario file (body: `{ "filename": "...", "content": "..." }`)
+- `GET /examples/scenarios` — list bundled example scenario files
+- `POST /examples/scenarios/import` — import a bundled example (body: `{ "filename": "..." }`)
+
+Example scenario file:
+
+```ts
+import type { ScenarioFactory } from "../../src/rules";
+
+export const scenarios: ScenarioFactory[] = [
+  () => {
+    let calls = 0;
+    return {
+      id: "mock-api",
+      name: "Mock API",
+      description: "Serve mock user responses",
+      rules: [
+        {
+          id: "mock-users",
+          handle: (context) => {
+            calls += 1;
+            if (context.method !== "GET") return null;
+            if (!/\/api\/users/.test(context.url)) return null;
+            return new Response(JSON.stringify({ calls, users: [{ id: 1, name: "Ava" }] }), {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            });
+          }
+        }
+      ]
+    };
+  }
+];
+```
+
+## Custom Views
+
+Views are named filter predicates that narrow which requests are displayed in the web UI. They are defined in view files (`~/.aproxy/views/*.ts`) separate from scenarios, and applied client-side — they do not affect proxy behavior or rule evaluation.
+
+Views can be imported from the web UI sidebar by clicking the `+` button next to the "Views" header, which opens a native file picker.
+
+Bundled examples are available in `examples/views/` and can be imported via the API.
+
+### Defining views
+
+Export a `views` array of `ViewFactory` functions:
+
+```ts
+import type { ViewFactory } from "../../src/rules";
+
+export const views: ViewFactory[] = [
+  () => ({
+    id: "errors-only",
+    name: "Errors Only",
+    description: "Show only requests with 4xx/5xx status codes",
+    filter: (ctx) => (ctx.status ?? 0) >= 400,
+  }),
+];
+```
+
+The filter function receives a `ViewContext`:
+
+```ts
+type ViewContext = {
+  id: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  status?: number;
+  responseHeaders?: Record<string, string>;
+  durationMs?: number;
+  mocked?: boolean;
+};
+```
+
+Return `true` to include the request in the view, `false` to hide it.
+
+### How it works
+
+1. Views are loaded from `~/.aproxy/views/*.ts` files at startup and hot-reloaded on file changes.
+2. The web UI sidebar shows a "Views" section listing all loaded views plus an "All requests" option.
+3. The filter function source is serialized as a string and compiled client-side via `new Function`, then applied to the request list.
+
+### Endpoints
+
+- `GET /views` — list all views and the default view ID
+- `PUT /views/default` — set the default view (body: `{ "viewId": "errors-only" }` or `{ "viewId": null }` to clear)
+- `POST /views/import` — upload a view file (body: `{ "filename": "...", "content": "..." }`)
+- `GET /examples/views` — list bundled example view files
+- `POST /examples/views/import` — import a bundled example (body: `{ "filename": "..." }`)
+
+### Default view
+
+You can mark a view as the default so it is automatically activated when the UI loads. The default is stored in `~/.aproxy/config.json` and can be set from the web UI (select a view, then click "set default") or via the REST API.
+
+The active view is purely client-side state. Manually selecting a different view takes precedence over the default for the current session.
 
 ## Simulator control (REST)
 
@@ -132,24 +254,18 @@ List simulators:
 curl -s http://localhost:8080/simulators | jq
 ```
 
-Install a root cert in a simulator:
+Install CA on an iOS simulator:
 
 ```bash
-curl -s -X POST http://localhost:8080/simulators/certs \
+curl -s -X POST http://localhost:8080/simulators/trust-ca \
   -H "Content-Type: application/json" \
-  -d '{"udid":"SIMULATOR_UDID","certPath":"/absolute/path/to/ca.pem"}'
+  -d '{"udid":"SIMULATOR_UDID"}'
 ```
 
 Check CA status:
 
 ```bash
 curl -s http://localhost:8080/ca/status | jq
-```
-
-Check if CA is trusted on host:
-
-```bash
-curl -s http://localhost:8080/ca/trust/status | jq
 ```
 
 Trust the CA on macOS (will prompt for sudo password):
@@ -162,14 +278,6 @@ Download the CA certificate:
 
 ```bash
 curl -s http://localhost:8080/ca/cert -o aproxy-ca.pem
-```
-
-Install CA on an iOS simulator:
-
-```bash
-curl -s -X POST http://localhost:8080/simulators/trust-ca \
-  -H "Content-Type: application/json" \
-  -d '{"udid":"SIMULATOR_UDID"}'
 ```
 
 Stream events:
@@ -192,90 +300,6 @@ curl -s -X PUT http://localhost:8080/scenarios/active \
   -d '{"scenarioId":"mock-api"}'
 ```
 
-Test HTTPS interception (MITM):
-
-```bash
-curl -x http://localhost:8080 --cacert ~/.aproxy/ca.pem https://httpbin.org/get
-```
-
-## Custom Views
-
-Views are named filter predicates that narrow which requests are displayed in the web UI. They are defined in rule files alongside scenarios and applied client-side — they do not affect proxy behavior or rule evaluation.
-
-### Defining views
-
-Export a `views` array of `ViewFactory` functions from any file in `rules/`:
-
-```ts
-import type { ViewFactory } from "../src/rules";
-
-export const views: ViewFactory[] = [
-  () => ({
-    id: "errors-only",
-    name: "Errors Only",
-    description: "Show only requests with 4xx/5xx status codes",
-    filter: (ctx) => (ctx.status ?? 0) >= 400,
-  }),
-  () => ({
-    id: "api-calls",
-    name: "API Calls",
-    description: "Show only requests containing /api/ in the URL",
-    filter: (ctx) => /\/api\//.test(ctx.url),
-  }),
-];
-```
-
-The filter function receives a `ViewContext`:
-
-```ts
-type ViewContext = {
-  id: string;
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  status?: number;
-  responseHeaders?: Record<string, string>;
-  durationMs?: number;
-  mocked?: boolean;
-};
-```
-
-Return `true` to include the request in the view, `false` to hide it.
-
-### How it works
-
-1. Views are loaded from `rules/*.ts` files at startup (alongside scenarios) and hot-reloaded on file changes.
-2. The web UI sidebar shows a "Views" section listing all loaded views plus an "All requests" option.
-3. Selecting a view sends `PUT /views/active` to the server, which broadcasts a `views_list` SSE event to all connected clients.
-4. The filter function source is serialized as a string and compiled client-side via `new Function`, then applied to the request list.
-
-### Endpoints
-
-- `GET /views` — list all views and the default view ID
-- `PUT /views/default` — set the default view (body: `{ "viewId": "errors-only" }` or `{ "viewId": null }` to clear). The default view is persisted to `~/.aproxy/config.json` and automatically activated when the UI loads.
-
-### Default view
-
-You can mark a view as the default so it is automatically activated when the UI loads. The default is stored in `~/.aproxy/config.json` and can be set from the web UI (select a view, then click "set default") or via the REST API.
-
-The active view is purely client-side state. Manually selecting a different view takes precedence over the default for the current session.
-
-### SSE event
-
-A `views_list` event is emitted when a new SSE client connects and whenever rule files are reloaded:
-
-```json
-{
-  "type": "views_list",
-  "views": [
-    { "id": "errors-only", "name": "Errors Only", "description": "...", "filter": "(ctx) => (ctx.status ?? 0) >= 400" }
-  ],
-  "defaultViewId": "errors-only"
-}
-```
-
-### Examples
-
 List views:
 
 ```bash
@@ -290,47 +314,10 @@ curl -s -X PUT http://localhost:8080/views/default \
   -d '{"viewId":"errors-only"}'
 ```
 
-Clear default view:
+Test HTTPS interception (MITM):
 
 ```bash
-curl -s -X PUT http://localhost:8080/views/default \
-  -H "Content-Type: application/json" \
-  -d '{"viewId":null}'
-```
-
-## Rules
-
-Rules are TypeScript modules under `rules/`. Each file exports `scenarios: ScenarioFactory[]`.
-
-Example:
-
-```ts
-import type { ScenarioFactory } from "../src/rules";
-
-export const scenarios: ScenarioFactory[] = [
-  () => {
-    let calls = 0;
-    return {
-      id: "mock-api",
-      name: "Mock API",
-      description: "Serve mock user responses",
-      rules: [
-        {
-          id: "mock-users",
-          handle: (context) => {
-            calls += 1;
-            if (context.method !== "GET") return null;
-            if (!/\/api\/users/.test(context.url)) return null;
-            return new Response(JSON.stringify({ calls, users: [{ id: 1, name: "Ava" }] }), {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            });
-          }
-        }
-      ]
-    };
-  }
-];
+curl -x http://localhost:8080 --cacert ~/.aproxy/ca.pem https://httpbin.org/get
 ```
 
 ## Error handling

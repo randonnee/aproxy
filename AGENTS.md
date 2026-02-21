@@ -8,11 +8,13 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 
 - Proxy HTTP traffic
 - Intercept HTTPS via CONNECT with MITM SSL decryption
-- Emit structured events for a web UI (both HTTP and decrypted HTTPS)
+- Emit structured events for a React web UI (both HTTP and decrypted HTTPS)
 - Configure the host macOS proxy via `networksetup`
 - Manage CA certificate trust on macOS and iOS simulators
 
 ## Repo layout
+
+### Backend (`src/`)
 
 - `src/index.ts` — entry point, wires dependencies together
 - `src/tcpProxy.ts` — raw TCP listener (`Bun.listen`), HTTP request parsing, CONNECT detection and dispatch
@@ -25,18 +27,57 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config (`networksetup`), CA trust on host. All functions return `Effect<T, CommandError>`
 - `src/eventBus.ts` — generic pub/sub for SSE events
 - `src/models.ts` — TypeScript event and model types
-- `src/rules.ts` — rule type definitions
-- `src/rulesLoader.ts` — rule file loading and hot-reload watching
+- `src/rules.ts` — rule and view type definitions (`ScenarioFactory`, `ViewFactory`, etc.)
+- `src/rulesLoader.ts` — scenario and view file loading from separate directories, hot-reload watching
 - `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
-- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId`
-- `src/ui.html` — single-page web UI
-- `rules/` — user-defined scenario/rule files
-- `~/.aproxy/` — runtime directory for CA cert (`ca.pem`), key (`ca-key.pem`), config (`config.json`), and temp files
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId` and `theme`
+- `src/ui.html` — legacy single-page web UI (fallback if React build is missing)
+
+### Web UI (`ui/`)
+
+The web UI is a React + TypeScript app built with Vite, served from `ui/dist/` by the backend.
+
+- `ui/src/App.tsx` — root component, layout shell
+- `ui/src/main.tsx` — React entry point
+- `ui/src/stores/appStore.ts` — Zustand store for app state (scenarios, views, requests, etc.)
+- `ui/src/hooks/useSSE.ts` — SSE connection hook, processes server events
+- `ui/src/hooks/useInitialData.ts` — fetches initial data on mount (proxy status, scenarios, views, simulators, CA trust, theme)
+- `ui/src/lib/api.ts` — API client functions for all backend endpoints
+- `ui/src/lib/types.ts` — TypeScript types for UI models
+- `ui/src/lib/helpers.ts` — utility functions
+- `ui/src/styles/global.css` — all styles (CSS variables, dark/light themes, layout, components)
+- `ui/src/components/TopBar.tsx` — app header with title, connection dot, theme toggle
+- `ui/src/components/Toolbar.tsx` — filter bar (search, method chips)
+- `ui/src/components/Sidebar/Sidebar.tsx` — sidebar container
+- `ui/src/components/Sidebar/ProxyToggle.tsx` — proxy enable/disable toggle
+- `ui/src/components/Sidebar/ScenarioList.tsx` — scenario list with + button to import files via file picker
+- `ui/src/components/Sidebar/ViewList.tsx` — view list with + button to import files via file picker, default view management
+- `ui/src/components/Sidebar/SimulatorList.tsx` — iOS simulator list with CA trust buttons
+- `ui/src/components/Sidebar/CaCertificate.tsx` — CA certificate status and trust management
+- `ui/src/components/RequestTable/RequestTable.tsx` — request list table with resizable columns
+- `ui/src/components/DetailPanel/DetailPanel.tsx` — request detail panel container
+- `ui/src/components/DetailPanel/OverviewTab.tsx` — request overview tab
+- `ui/src/components/DetailPanel/HeadersTab.tsx` — request/response headers tab
+- `ui/src/components/DetailPanel/BodyTab.tsx` — request/response body tab
+- `ui/src/components/DetailPanel/ResizeHandle.tsx` — draggable resize handle
+
+### Examples
+
+- `examples/scenarios/` — bundled example scenario files (mock-api.ts, mock-uuid.ts)
+- `examples/views/` — bundled example view files (errors-only.ts)
+
+### Runtime directory (`~/.aproxy/`)
+
+- `~/.aproxy/ca.pem` — auto-generated CA certificate
+- `~/.aproxy/ca-key.pem` — CA private key
+- `~/.aproxy/config.json` — user config (defaultViewId, theme)
+- `~/.aproxy/scenarios/` — user scenario files (loaded at runtime)
+- `~/.aproxy/views/` — user view files (loaded at runtime)
 
 ## Development constraints
 
 - Prefer minimal, focused changes per step.
-- Do not add UI frameworks yet; keep UI work to a simple event listener when requested.
+- The web UI is a React app in `ui/`. After UI changes, run `npm run build` in `ui/` to update the dist served by the backend. The Vite dev server on port 3000 (via `ui/vite.config.ts` proxy) shows changes immediately during development.
 - Avoid adding dependencies unless they are clearly necessary.
 - The project uses Effect-TS for error handling and composition; keep that pattern.
 
@@ -107,20 +148,40 @@ The CA is auto-generated on first run and stored at `~/.aproxy/`. API endpoints 
 - MITM SSL interception is implemented. Decrypted HTTPS traffic flows through the same rule pipeline as HTTP.
 - CA certificate generation and trust management are implemented for both macOS host and iOS simulators.
 - For simulator proxy config: proxy is already host-level via `networksetup`; no per-simulator config needed.
-- Custom views are implemented. Views are client-side filter predicates defined in rule files that narrow the request list in the web UI. They do not affect proxy behavior.
+- Custom views are implemented. Views are client-side filter predicates defined in view files (`~/.aproxy/views/`) that narrow the request list in the web UI. They do not affect proxy behavior.
+
+## Scenarios and views
+
+Scenarios and views are separate concepts stored in separate directories:
+
+- **Scenarios** (`~/.aproxy/scenarios/`) — files export `scenarios: ScenarioFactory[]`. Each scenario contains rules that can intercept and mock HTTP responses.
+- **Views** (`~/.aproxy/views/`) — files export `views: ViewFactory[]`. Each view defines a client-side filter predicate that controls which requests appear in the web UI.
+
+Both can be imported from the web UI sidebar via a `+` icon button that opens the native file picker. Scenario and view files are `.ts` or `.js` files.
+
+Directories are auto-created on first run if they don't exist (`rulesLoader.ts` `ensureDir()`).
+
+### Import endpoints
+
+- `POST /scenarios/import` — body `{ "filename": "...", "content": "..." }`, writes file to `~/.aproxy/scenarios/` and reloads
+- `POST /views/import` — body `{ "filename": "...", "content": "..." }`, writes file to `~/.aproxy/views/` and reloads
+- `GET /examples/scenarios` — lists bundled example scenario files
+- `GET /examples/views` — lists bundled example view files
+- `POST /examples/scenarios/import` — body `{ "filename": "..." }`, copies bundled example to `~/.aproxy/scenarios/` and reloads
+- `POST /examples/views/import` — body `{ "filename": "..." }`, copies bundled example to `~/.aproxy/views/` and reloads
 
 ## Custom views
 
-Views are named filter functions exported from rule files (`rules/*.ts`) that control which requests appear in the web UI. They are purely a display concern — they do not affect proxy behavior, rule evaluation, or traffic interception.
+Views are named filter functions exported from view files (`~/.aproxy/views/*.ts`) that control which requests appear in the web UI. They are purely a display concern — they do not affect proxy behavior, rule evaluation, or traffic interception.
 
 ### Data flow
 
-1. Rule files export `views: ViewFactory[]` alongside `scenarios`. Each factory returns a `ViewInstance` with `id`, `name`, optional `description`, and a `filter: (ctx: ViewContext) => boolean` predicate.
-2. `src/rulesLoader.ts` loads views from all rule files, producing `LoadedView[]` (view + `filePath`).
+1. View files export `views: ViewFactory[]`. Each factory returns a `ViewInstance` with `id`, `name`, optional `description`, and a `filter: (ctx: ViewContext) => boolean` predicate.
+2. `src/rulesLoader.ts` loads views from all view files in `~/.aproxy/views/`, producing `LoadedView[]` (view + `filePath`).
 3. `src/index.ts` stores loaded views in module-level state and constructs `views_list` events for the event bus. If a `defaultViewId` is configured, it is included in the event so the client can apply it.
 4. `src/server.ts` exposes `GET /views` and `PUT /views/default` endpoints.
 5. `src/http.ts` sends the initial `views_list` event when a new SSE client connects.
-6. The web UI (`src/ui.html`) renders views in the sidebar, compiles the filter source string via `new Function`, and applies it client-side to filter the request list.
+6. The web UI renders views in the sidebar, compiles the filter source string via `new Function`, and applies it client-side to filter the request list.
 
 ### Key types (`src/rules.ts`)
 
@@ -141,7 +202,7 @@ The default view is stored in `~/.aproxy/config.json` (managed by `src/config.ts
 
 ### Hot-reload
 
-Views are reloaded alongside scenarios when rule files change. The `watchRules` watcher re-runs the loader and emits both `rules_list` and `views_list` events.
+Views are reloaded alongside scenarios when rule files change. The `watchDir` watcher re-runs the loader and emits both `rules_list` and `views_list` events.
 
 ### Client-side filter compilation
 

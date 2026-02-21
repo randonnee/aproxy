@@ -14,11 +14,13 @@ import {
   trustCaCertOnHost,
   isCaTrustedOnHost,
 } from "./simulators";
-import { loadScenarios, watchRules } from "./rulesLoader";
+import { loadScenarios, loadViews, watchDir } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
 import { type RuleHandler } from "./rules";
 import { ensureCa } from "./ca";
 import { loadConfig, saveConfig, type AproxyConfig } from "./config";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
@@ -26,7 +28,9 @@ let loadedScenarios: LoadedScenario[] = [];
 let activeScenarioId: string | null = null;
 let loadedViews: LoadedView[] = [];
 let config: AproxyConfig = loadConfig();
-const rulesDirUrl = new URL("../rules", import.meta.url);
+const aproxyDir = join(homedir(), ".aproxy");
+const scenariosDir = join(aproxyDir, "scenarios");
+const viewsDir = join(aproxyDir, "views");
 
 const listRulesEvent = (): RulesListEvent => ({
   type: "rules_list",
@@ -90,11 +94,15 @@ const main = Effect.gen(function* (_) {
   // Initialize the CA for MITM SSL interception
   const ca: CaCert = yield* _(ensureCa());
 
-  const loadRulesEffect = loadScenarios(rulesDirUrl, setLoadedScenarios, setActiveScenarioId, setLoadedViews);
+  const loadScenariosEffect = loadScenarios(scenariosDir, setLoadedScenarios, setActiveScenarioId);
+  const loadViewsEffect = loadViews(viewsDir, setLoadedViews);
+  const loadAllRules = Effect.all([loadScenariosEffect, loadViewsEffect], { concurrency: "unbounded" }).pipe(Effect.asVoid);
   const routes = createRoutes({
     listRulesEvent,
     listViewsEvent,
-    loadRules: () => loadRulesEffect,
+    loadRules: () => loadAllRules,
+    scenariosDir,
+    viewsDir,
     handleProxy,
     createSse: (signal) => createSse(eventBus, listRulesEvent, listViewsEvent, signal),
     getActiveScenarioId: () => activeScenarioId,
@@ -153,17 +161,19 @@ const main = Effect.gen(function* (_) {
   });
 
   yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
-  yield* _(loadRulesEffect);
-  yield* _(
-    watchRules(rulesDirUrl, () => {
-      void Effect.runPromise(
-        loadRulesEffect.pipe(Effect.tap(() => Effect.sync(() => {
-          eventBus.emit(listRulesEvent());
-          eventBus.emit(listViewsEvent());
-        })))
-      );
-    })
-  );
+  yield* _(loadAllRules);
+
+  const emitReload = () => {
+    void Effect.runPromise(
+      loadAllRules.pipe(Effect.tap(() => Effect.sync(() => {
+        eventBus.emit(listRulesEvent());
+        eventBus.emit(listViewsEvent());
+      })))
+    );
+  };
+
+  yield* _(watchDir(scenariosDir, emitReload));
+  yield* _(watchDir(viewsDir, emitReload));
   console.log(`Proxy listening on :${proxyPort} (MITM enabled)`);
 });
 

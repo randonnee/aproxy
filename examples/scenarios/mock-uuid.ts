@@ -1,4 +1,4 @@
-import type { ScenarioFactory } from "../src/rules";
+import type { ScenarioFactory } from "../../src/rules";
 
 export const scenarios: ScenarioFactory[] = [
   () => {
@@ -17,10 +17,7 @@ export const scenarios: ScenarioFactory[] = [
             calls += 1;
             return new Response(
               JSON.stringify({ uuid: `test-uuid-${calls}` }),
-              {
-                status: 200,
-                headers: { "content-type": "application/json" },
-              }
+              { status: 200, headers: { "content-type": "application/json" } }
             );
           },
         },
@@ -34,16 +31,9 @@ export const scenarios: ScenarioFactory[] = [
             await new Promise((resolve) => setTimeout(resolve, 2000));
             return new Response(
               JSON.stringify({
-                json: {
-                  mock: true,
-                  message: "This is mock data from aproxy",
-                  timestamp: Date.now(),
-                },
+                json: { mock: true, message: "This is mock data from aproxy", timestamp: Date.now() },
               }),
-              {
-                status: 200,
-                headers: { "content-type": "application/json" },
-              }
+              { status: 200, headers: { "content-type": "application/json" } }
             );
           },
         },

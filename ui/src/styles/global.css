@@ -70,7 +70,7 @@
 
 /* ── Layout tokens ── */
 :root {
-  --sidebar-w: 17rem;
+  --sidebar-w: 19rem;
   --detail-h: 22rem;
   --header-h: 3.2rem;
   --toolbar-h: 2.6rem;
@@ -270,6 +270,9 @@ body {
 }
 
 .sidebar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -277,6 +280,37 @@ body {
   color: var(--ink-faint);
   margin-bottom: 0.65rem;
   transition: color 0.2s;
+}
+
+.sidebar-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sidebar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+}
+.sidebar-icon-btn:hover {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: var(--border-accent);
+}
+.sidebar-icon-btn.active {
+  background: var(--accent-glow);
+  color: var(--accent);
+  border-color: var(--border-accent);
 }
 
 /* Proxy toggle */

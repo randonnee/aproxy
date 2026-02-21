@@ -3,8 +3,8 @@ import type { CaCert } from "./ca";
 import type { AproxyConfig } from "./config";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
-import { existsSync, readFileSync } from "node:fs";
-import { join, extname } from "node:path";
+import { existsSync, readFileSync, readdirSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { join, extname, basename } from "node:path";
 import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
 import { createTcpProxy } from "./tcpProxy";
@@ -13,6 +13,9 @@ import { createTcpProxy } from "./tcpProxy";
 const uiDistDir = join(import.meta.dir, "..", "ui", "dist");
 const uiIndexPath = join(uiDistDir, "index.html");
 const uiFallbackPath = new URL("./ui.html", import.meta.url);
+
+// Resolve bundled examples directory
+const examplesDir = join(import.meta.dir, "..", "examples");
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -70,6 +73,8 @@ export function createRoutes(
     listRulesEvent: () => RulesListEvent;
     listViewsEvent: () => ViewsListEvent;
     loadRules: () => Effect.Effect<void, RequestError | unknown>;
+    scenariosDir: string;
+    viewsDir: string;
     handleProxy: (req: Request) => Effect.Effect<Response, unknown>;
     createSse: (signal: AbortSignal) => ReadableStream<string>;
     getScenarios: () => Array<{ id: string; name: string; description?: string; rules: Array<{ id: string; name?: string; description?: string }> }>;
@@ -182,6 +187,84 @@ export function createRoutes(
       if (isControlRequest && url?.pathname === "/rules/reload" && req.method === "POST") {
         yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
         return Response.json(deps.listRulesEvent());
+      }
+
+      // --- File import: upload a file to scenarios or views directory ---
+      if (isControlRequest && url?.pathname === "/scenarios/import" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ filename: string; content: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const safeName = basename(body.filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+        if (!existsSync(deps.scenariosDir)) mkdirSync(deps.scenariosDir, { recursive: true });
+        writeFileSync(join(deps.scenariosDir, safeName), body.content, "utf-8");
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ imported: safeName, ...deps.listRulesEvent() });
+      }
+
+      if (isControlRequest && url?.pathname === "/views/import" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ filename: string; content: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const safeName = basename(body.filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+        if (!existsSync(deps.viewsDir)) mkdirSync(deps.viewsDir, { recursive: true });
+        writeFileSync(join(deps.viewsDir, safeName), body.content, "utf-8");
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ imported: safeName });
+      }
+
+      // --- Examples: list and import bundled example files ---
+      if (isControlRequest && url?.pathname === "/examples/scenarios" && req.method === "GET") {
+        const dir = join(examplesDir, "scenarios");
+        const files = existsSync(dir)
+          ? readdirSync(dir).filter((f) => /\.(ts|js)$/.test(f))
+          : [];
+        return Response.json({ files });
+      }
+
+      if (isControlRequest && url?.pathname === "/examples/views" && req.method === "GET") {
+        const dir = join(examplesDir, "views");
+        const files = existsSync(dir)
+          ? readdirSync(dir).filter((f) => /\.(ts|js)$/.test(f))
+          : [];
+        return Response.json({ files });
+      }
+
+      if (isControlRequest && url?.pathname === "/examples/scenarios/import" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ filename: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const safeName = basename(body.filename);
+        const src = join(examplesDir, "scenarios", safeName);
+        if (!existsSync(src)) {
+          return Response.json({ error: `Example not found: ${safeName}` }, { status: 404 });
+        }
+        if (!existsSync(deps.scenariosDir)) mkdirSync(deps.scenariosDir, { recursive: true });
+        copyFileSync(src, join(deps.scenariosDir, safeName));
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ imported: safeName });
+      }
+
+      if (isControlRequest && url?.pathname === "/examples/views/import" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ filename: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const safeName = basename(body.filename);
+        const src = join(examplesDir, "views", safeName);
+        if (!existsSync(src)) {
+          return Response.json({ error: `Example not found: ${safeName}` }, { status: 404 });
+        }
+        if (!existsSync(deps.viewsDir)) mkdirSync(deps.viewsDir, { recursive: true });
+        copyFileSync(src, join(deps.viewsDir, safeName));
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ imported: safeName });
       }
 
       // --- Config / Theme ---

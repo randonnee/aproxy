@@ -63,6 +63,60 @@ export async function reloadRules(): Promise<void> {
   await fetch(`${API_BASE}/rules/reload`, { method: "POST" });
 }
 
+// --- Import: upload a file to scenarios or views ---
+
+export async function importScenarioFile(
+  filename: string,
+  content: string
+): Promise<{ imported: string }> {
+  return fetchJson("/scenarios/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content }),
+  });
+}
+
+export async function importViewFile(
+  filename: string,
+  content: string
+): Promise<{ imported: string }> {
+  return fetchJson("/views/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content }),
+  });
+}
+
+// --- Examples: list and import bundled examples ---
+
+export async function getExampleScenarios(): Promise<{ files: string[] }> {
+  return fetchJson("/examples/scenarios");
+}
+
+export async function getExampleViews(): Promise<{ files: string[] }> {
+  return fetchJson("/examples/views");
+}
+
+export async function importExampleScenario(
+  filename: string
+): Promise<{ imported: string }> {
+  return fetchJson("/examples/scenarios/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename }),
+  });
+}
+
+export async function importExampleView(
+  filename: string
+): Promise<{ imported: string }> {
+  return fetchJson("/examples/views/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename }),
+  });
+}
+
 export async function getViews(): Promise<{
   views: ViewDef[];
   defaultViewId: string | null;

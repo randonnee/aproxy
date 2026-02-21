@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useAppStore } from "../../stores/appStore";
 import * as api from "../../lib/api";
 
@@ -5,6 +6,8 @@ export function ScenarioList() {
   const scenarios = useAppStore((s) => s.scenarios);
   const activeScenarioId = useAppStore((s) => s.activeScenarioId);
   const setScenarios = useAppStore((s) => s.setScenarios);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSetActive = async (id: string | null) => {
     try {
@@ -15,25 +18,48 @@ export function ScenarioList() {
     }
   };
 
-  const handleReload = async () => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     try {
-      await api.reloadRules();
+      const content = await file.text();
+      await api.importScenarioFile(file.name, content);
       const data = await api.getScenarios();
       setScenarios(data.scenarios, data.activeScenarioId);
     } catch {
       // ignore
     }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
     <div className="sidebar-section">
-      <div className="sidebar-title">Scenarios</div>
+      <div className="sidebar-title">
+        <span>Scenarios</span>
+        <div className="sidebar-title-actions">
+          <button
+            className="sidebar-icon-btn"
+            onClick={() => fileInputRef.current?.click()}
+            title="Import scenario"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".ts,.js"
+        onChange={handleFileUpload}
+        style={{ display: "none" }}
+      />
       <div>
         {scenarios.length === 0 ? (
           <div className="sidebar-empty">No scenarios loaded</div>
         ) : (
           <>
-            {/* None option */}
             <div
               className={`scenario-item${activeScenarioId === null ? " active" : ""}`}
               onClick={() => handleSetActive(null)}
@@ -71,9 +97,6 @@ export function ScenarioList() {
           </>
         )}
       </div>
-      <button className="sidebar-btn" onClick={handleReload}>
-        Reload Rules
-      </button>
     </div>
   );
 }
