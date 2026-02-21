@@ -6,7 +6,7 @@ export const scenarios: ScenarioFactory[] = [
     return {
       id: "mock-uuid",
       name: "Postbin Mock",
-      description: "Replace POST requests to httpbin.org/uuid with an incrementing UUID",
+      description: "Example mocks for postbin",
       rules: [
         {
           id: "mock-httpbin-uuid",

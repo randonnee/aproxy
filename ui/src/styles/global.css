@@ -1,6 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
    Aproxy — UI stylesheet
-   Aesthetic: Editorial precision. Warm neutrals + sharp accents.
 
    Responsive scaling: The root font-size uses clamp() keyed to
    viewport width so that all rem-based sizes grow on larger /
@@ -10,62 +9,62 @@
 /* ── Dark theme (default) ── */
 :root,
 [data-theme="dark"] {
-  --bg: #0d1117;
-  --bg-alt: #131920;
-  --panel: #161b22;
-  --panel-strong: #1c2330;
-  --surface: #21283b;
-  --border: rgba(240, 246, 252, 0.06);
-  --border-strong: rgba(240, 246, 252, 0.12);
-  --border-accent: rgba(88, 166, 255, 0.25);
-  --ink: #e6edf3;
-  --ink-muted: #a8b5c0;
-  --ink-faint: #6e7b85;
-  --accent: #58a6ff;
-  --accent-glow: rgba(88, 166, 255, 0.15);
-  --accent-subtle: rgba(88, 166, 255, 0.08);
-  --success: #3fb950;
-  --success-subtle: rgba(63, 185, 80, 0.12);
-  --warn: #d29922;
-  --warn-subtle: rgba(210, 153, 34, 0.12);
-  --error: #f85149;
-  --error-subtle: rgba(248, 81, 73, 0.12);
-  --purple: #bc8cff;
-  --purple-subtle: rgba(188, 140, 255, 0.1);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 3px 12px rgba(0, 0, 0, 0.4);
-  --scrollbar-thumb: rgba(240, 246, 252, 0.1);
-  --scrollbar-hover: rgba(240, 246, 252, 0.18);
+  --bg: #121110;
+  --bg-alt: #161514;
+  --panel: #1b1918;
+  --panel-strong: #232120;
+  --surface: #2d2a28;
+  --border: rgba(235, 225, 215, 0.07);
+  --border-strong: rgba(235, 225, 215, 0.13);
+  --border-accent: rgba(78, 140, 210, 0.3);
+  --ink: #ddd8d3;
+  --ink-muted: #9e9590;
+  --ink-faint: #6b6360;
+  --accent: #6a9fd8;
+  --accent-glow: rgba(106, 159, 216, 0.14);
+  --accent-subtle: rgba(106, 159, 216, 0.07);
+  --success: #6db553;
+  --success-subtle: rgba(109, 181, 83, 0.12);
+  --warn: #d4993a;
+  --warn-subtle: rgba(212, 153, 58, 0.12);
+  --error: #d46a6a;
+  --error-subtle: rgba(212, 106, 106, 0.12);
+  --purple: #a882c5;
+  --purple-subtle: rgba(168, 130, 197, 0.11);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --scrollbar-thumb: rgba(235, 225, 215, 0.08);
+  --scrollbar-hover: rgba(235, 225, 215, 0.16);
 }
 
 /* ── Light theme ── */
 [data-theme="light"] {
-  --bg: #f6f8fa;
-  --bg-alt: #eef1f5;
-  --panel: #ffffff;
-  --panel-strong: #f0f3f6;
-  --surface: #e8ecf0;
-  --border: rgba(31, 35, 40, 0.08);
-  --border-strong: rgba(31, 35, 40, 0.15);
-  --border-accent: rgba(9, 105, 218, 0.3);
-  --ink: #1f2328;
-  --ink-muted: #656d76;
-  --ink-faint: #8b949e;
-  --accent: #0969da;
-  --accent-glow: rgba(9, 105, 218, 0.1);
-  --accent-subtle: rgba(9, 105, 218, 0.06);
-  --success: #1a7f37;
-  --success-subtle: rgba(26, 127, 55, 0.08);
-  --warn: #9a6700;
-  --warn-subtle: rgba(154, 103, 0, 0.08);
-  --error: #cf222e;
-  --error-subtle: rgba(207, 34, 46, 0.08);
-  --purple: #8250df;
-  --purple-subtle: rgba(130, 80, 223, 0.08);
-  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.06);
-  --shadow-md: 0 3px 12px rgba(31, 35, 40, 0.12);
-  --scrollbar-thumb: rgba(31, 35, 40, 0.12);
-  --scrollbar-hover: rgba(31, 35, 40, 0.22);
+  --bg: #f5f3f0;
+  --bg-alt: #edebe7;
+  --panel: #faf9f7;
+  --panel-strong: #f0eee9;
+  --surface: #dfdbd5;
+  --border: rgba(50, 40, 35, 0.08);
+  --border-strong: rgba(50, 40, 35, 0.15);
+  --border-accent: rgba(30, 95, 170, 0.25);
+  --ink: #1c1816;
+  --ink-muted: #6a5f58;
+  --ink-faint: #9a918a;
+  --accent: #1e5faa;
+  --accent-glow: rgba(30, 95, 170, 0.1);
+  --accent-subtle: rgba(30, 95, 170, 0.05);
+  --success: #3e8a2a;
+  --success-subtle: rgba(62, 138, 42, 0.08);
+  --warn: #9e6d14;
+  --warn-subtle: rgba(158, 109, 20, 0.08);
+  --error: #b84444;
+  --error-subtle: rgba(184, 68, 68, 0.07);
+  --purple: #7650a0;
+  --purple-subtle: rgba(118, 80, 160, 0.07);
+  --shadow-sm: 0 1px 2px rgba(30, 20, 10, 0.06);
+  --shadow-md: 0 3px 12px rgba(30, 20, 10, 0.1);
+  --scrollbar-thumb: rgba(50, 40, 35, 0.1);
+  --scrollbar-hover: rgba(50, 40, 35, 0.2);
 }
 
 /* ── Layout tokens ── */
@@ -74,11 +73,11 @@
   --detail-h: 22rem;
   --header-h: 3.2rem;
   --toolbar-h: 2.6rem;
-  --radius-sm: 0.4rem;
-  --radius-md: 0.5rem;
-  --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-  --sans: "DM Sans", system-ui, -apple-system, sans-serif;
-  --display: "Instrument Serif", Georgia, serif;
+  --radius-sm: 0.35rem;
+  --radius-md: 0.45rem;
+  --mono: "IBM Plex Mono", "Menlo", ui-monospace, monospace;
+  --sans: "Outfit", system-ui, -apple-system, sans-serif;
+  --display: "Crimson Pro", Georgia, serif;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -171,9 +170,9 @@ body {
 
 .topbar h1 {
   font-family: var(--display);
-  font-size: 1.45rem;
-  font-weight: 400;
-  font-style: italic;
+  font-size: 1.5rem;
+  font-weight: 500;
+  font-style: normal;
   letter-spacing: -0.01em;
   color: var(--ink);
   transition: color 0.2s;
@@ -189,7 +188,7 @@ body {
 }
 .conn-dot.active {
   background: var(--success);
-  box-shadow: 0 0 0 0.2rem var(--success-subtle), 0 0 0.5rem rgba(63, 185, 80, 0.3);
+  box-shadow: 0 0 0 0.2rem var(--success-subtle), 0 0 0.5rem rgba(109, 181, 83, 0.2);
 }
 .conn-dot.disconnected {
   background: var(--error);
@@ -479,7 +478,7 @@ body {
 }
 .sim-trust-btn.trusted {
   color: var(--success);
-  border-color: rgba(63, 185, 80, 0.2);
+  border-color: rgba(109, 181, 83, 0.2);
   cursor: default;
   opacity: 0.7;
 }
@@ -629,11 +628,11 @@ body {
   background: var(--accent-subtle);
   border-color: var(--border-accent);
 }
-.method-chip.active .method-label.method-GET { color: var(--success); border-color: rgba(63,185,80,0.3); background: var(--success-subtle); }
+.method-chip.active .method-label.method-GET { color: var(--success); border-color: rgba(109,181,83,0.3); background: var(--success-subtle); }
 .method-chip.active .method-label.method-POST { color: var(--accent); border-color: var(--border-accent); background: var(--accent-subtle); }
-.method-chip.active .method-label.method-PUT { color: var(--warn); border-color: rgba(210,153,34,0.3); background: var(--warn-subtle); }
-.method-chip.active .method-label.method-DELETE { color: var(--error); border-color: rgba(248,81,73,0.3); background: var(--error-subtle); }
-.method-chip.active .method-label.method-PATCH { color: var(--purple); border-color: rgba(188,140,255,0.3); background: var(--purple-subtle); }
+.method-chip.active .method-label.method-PUT { color: var(--warn); border-color: rgba(212,153,58,0.3); background: var(--warn-subtle); }
+.method-chip.active .method-label.method-DELETE { color: var(--error); border-color: rgba(212,106,106,0.3); background: var(--error-subtle); }
+.method-chip.active .method-label.method-PATCH { color: var(--purple); border-color: rgba(168,130,197,0.3); background: var(--purple-subtle); }
 .method-chip.active .method-label.method-CONNECT { color: var(--ink-muted); border-color: var(--border-strong); background: var(--surface); }
 
 /* ════════════════════════════════════════════
@@ -671,11 +670,11 @@ button.primary:hover {
 }
 button.danger {
   color: var(--error);
-  border-color: rgba(248, 81, 73, 0.2);
+  border-color: rgba(212, 106, 106, 0.2);
   background: var(--error-subtle);
 }
 button.danger:hover {
-  border-color: rgba(248, 81, 73, 0.4);
+  border-color: rgba(212, 106, 106, 0.4);
 }
 
 /* ════════════════════════════════════════════
@@ -755,7 +754,7 @@ button.danger:hover {
   color: var(--purple);
 }
 .rtable-row.mocked:hover {
-  background: rgba(188, 140, 255, 0.14);
+  background: rgba(168, 130, 197, 0.15);
 }
 
 /* Column resize handle */
@@ -1076,7 +1075,6 @@ button.danger:hover {
   font-size: 2.5rem;
   opacity: 0.2;
   font-family: var(--display);
-  font-style: italic;
 }
 
 /* ════════════════════════════════════════════
