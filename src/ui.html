@@ -655,6 +655,14 @@
           <button class="sidebar-btn" id="reloadRulesBtn">Reload Rules</button>
         </div>
 
+        <!-- Views -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Views</div>
+          <div id="viewList">
+            <div class="sidebar-empty">No views loaded</div>
+          </div>
+        </div>
+
         <!-- Simulators -->
         <div class="sidebar-section">
           <div class="sidebar-title">Simulators</div>
@@ -731,6 +739,9 @@
       let scenarios = [];
       let activeScenarioId = null;
       let simulators = [];
+      let views = [];         // { id, name, description?, filter (source string) }
+      let activeViewId = null;
+      let activeViewFn = null; // compiled filter function or null
 
       // ── DOM refs ──
       const connDot = document.getElementById("connDot");
@@ -744,6 +755,7 @@
       const detailPanel = document.getElementById("detailPanel");
       const detailContent = document.getElementById("detailContent");
       const scenarioList = document.getElementById("scenarioList");
+      const viewList = document.getElementById("viewList");
       const simList = document.getElementById("simList");
       const proxyToggleBtn = document.getElementById("proxyToggleBtn");
       const reloadRulesBtn = document.getElementById("reloadRulesBtn");
@@ -966,6 +978,83 @@
         } catch {}
       });
 
+      // ── Views (custom filters) ──
+      async function fetchViews() {
+        try {
+          const res = await fetch("/views");
+          const data = await res.json();
+          views = data.views || [];
+          activeViewId = data.activeViewId;
+          compileActiveView();
+          renderViews();
+          renderRequestList();
+        } catch {}
+      }
+
+      function compileActiveView() {
+        if (!activeViewId) {
+          activeViewFn = null;
+          return;
+        }
+        const view = views.find(v => v.id === activeViewId);
+        if (!view || !view.filter) {
+          activeViewFn = null;
+          return;
+        }
+        try {
+          // The filter source is a function expression, e.g. "(context) => { ... }"
+          // Wrap in parens and eval to get the function reference
+          activeViewFn = new Function("return (" + view.filter + ")")();
+        } catch (e) {
+          console.error("Failed to compile view filter:", e);
+          activeViewFn = null;
+        }
+      }
+
+      function renderViews() {
+        if (!views.length) {
+          viewList.innerHTML = '<div class="sidebar-empty">No views loaded</div>';
+          return;
+        }
+        viewList.innerHTML = "";
+        // "All" option (no filter)
+        const allEl = document.createElement("div");
+        allEl.className = "scenario-item" + (activeViewId === null ? " active" : "");
+        allEl.innerHTML = '<div class="dot"></div><span>All requests</span>';
+        allEl.addEventListener("click", () => setActiveView(null));
+        viewList.appendChild(allEl);
+
+        views.forEach(v => {
+          const el = document.createElement("div");
+          el.className = "scenario-item" + (v.id === activeViewId ? " active" : "");
+          el.innerHTML = `<div class="dot"></div><span>${esc(v.name || v.id)}</span>`;
+          el.addEventListener("click", () => setActiveView(v.id));
+          viewList.appendChild(el);
+          if (v.description) {
+            const desc = document.createElement("div");
+            desc.className = "scenario-desc";
+            desc.textContent = v.description;
+            viewList.appendChild(desc);
+          }
+        });
+      }
+
+      async function setActiveView(id) {
+        try {
+          const res = await fetch("/views/active", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ viewId: id })
+          });
+          const data = await res.json();
+          views = data.views || views;
+          activeViewId = data.activeViewId;
+          compileActiveView();
+          renderViews();
+          renderRequestList();
+        } catch {}
+      }
+
       // ── Simulators ──
       async function fetchSimulators() {
         try {
@@ -1050,6 +1139,24 @@
           if (search) {
             const haystack = `${entry.request.method} ${entry.request.url} ${entry.response?.status || ""}`.toLowerCase();
             if (!haystack.includes(search)) return false;
+          }
+          // Apply active view filter
+          if (activeViewFn) {
+            try {
+              const ctx = {
+                id: entry.request.id,
+                url: entry.request.url,
+                method: entry.request.method,
+                headers: entry.request.headers || {},
+                status: entry.response?.status,
+                responseHeaders: entry.response?.headers,
+                durationMs: entry.response?.durationMs,
+                mocked: entry.response?.mocked,
+              };
+              if (!activeViewFn(ctx)) return false;
+            } catch {
+              // If filter throws, include the request
+            }
           }
           return true;
         });
@@ -1221,6 +1328,9 @@
         } else if (evt.type === "rules_list") {
           // Refresh scenarios view
           fetchScenarios();
+        } else if (evt.type === "views_list") {
+          // Refresh views
+          fetchViews();
         } else if (evt.type === "simulators_list") {
           simulators = evt.simulators || [];
           renderSimulators();
@@ -1284,6 +1394,7 @@
       fetch("/proxy/status").then(r => r.json()).then(p => updateProxyToggle(p.enabled)).catch(() => {});
       fetchCaTrustStatus();
       fetchScenarios();
+      fetchViews();
       fetchSimulators();
       startSSE();
     </script>

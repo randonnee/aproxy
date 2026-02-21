@@ -1,4 +1,4 @@
-import type { ScenarioFactory } from "../src/rules";
+import type { ScenarioFactory, ViewFactory } from "../src/rules";
 
 export const scenarios: ScenarioFactory[] = [
   () => {
@@ -25,4 +25,19 @@ export const scenarios: ScenarioFactory[] = [
       ]
     };
   }
+];
+
+export const views: ViewFactory[] = [
+  () => ({
+    id: "errors-only",
+    name: "Errors Only",
+    description: "Show only requests with 4xx/5xx status codes",
+    filter: (ctx) => (ctx.status ?? 0) >= 400,
+  }),
+  () => ({
+    id: "api-calls",
+    name: "API Calls",
+    description: "Show only requests containing /api/ in the URL",
+    filter: (ctx) => /\/api\//.test(ctx.url),
+  }),
 ];

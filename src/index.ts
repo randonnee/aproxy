@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import type { ProxyEvent, RulesListEvent, SimulatorEvent } from "./models";
-import type { LoadedScenario } from "./rules";
+import type { ProxyEvent, RulesListEvent, ViewsListEvent, SimulatorEvent } from "./models";
+import type { LoadedScenario, LoadedView } from "./rules";
 import type { CaCert } from "./ca";
 import { EventBus } from "./eventBus";
 import { ProxyError } from "./errors";
@@ -20,9 +20,11 @@ import { type RuleHandler } from "./rules";
 import { ensureCa } from "./ca";
 
 const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
-const eventBus = new EventBus<ProxyEvent | RulesListEvent | SimulatorEvent>();
+const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
 let loadedScenarios: LoadedScenario[] = [];
 let activeScenarioId: string | null = null;
+let loadedViews: LoadedView[] = [];
+let activeViewId: string | null = null;
 const rulesDirUrl = new URL("../rules", import.meta.url);
 
 const listRulesEvent = (): RulesListEvent => ({
@@ -37,6 +39,15 @@ const listRulesEvent = (): RulesListEvent => ({
     : []
 });
 
+const listViewsEvent = (): ViewsListEvent => ({
+  type: "views_list",
+  views: loadedViews.map(({ id, name, description, filter }) => ({
+    id, name, description,
+    filter: filter.toString(),
+  })),
+  activeViewId,
+});
+
 
 const setLoadedScenarios = (scenarios: LoadedScenario[]) => {
   loadedScenarios = scenarios;
@@ -44,6 +55,14 @@ const setLoadedScenarios = (scenarios: LoadedScenario[]) => {
 
 const setActiveScenarioId = (id: string | null) => {
   activeScenarioId = id;
+};
+
+const setLoadedViews = (views: LoadedView[]) => {
+  loadedViews = views;
+};
+
+const setActiveViewId = (id: string | null) => {
+  activeViewId = id;
 };
 
 const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
@@ -67,18 +86,25 @@ const main = Effect.gen(function* (_) {
   // Initialize the CA for MITM SSL interception
   const ca: CaCert = yield* _(ensureCa());
 
-  const loadRulesEffect = loadScenarios(rulesDirUrl, setLoadedScenarios, setActiveScenarioId);
+  const loadRulesEffect = loadScenarios(rulesDirUrl, setLoadedScenarios, setActiveScenarioId, setLoadedViews);
   const routes = createRoutes({
     listRulesEvent,
+    listViewsEvent,
     loadRules: () => loadRulesEffect,
     handleProxy,
-    createSse: (signal) => createSse(eventBus, listRulesEvent, signal),
+    createSse: (signal) => createSse(eventBus, listRulesEvent, listViewsEvent, signal),
     getActiveScenarioId: () => activeScenarioId,
     setActiveScenarioId,
     getScenarios: () => loadedScenarios.map(({ id, name, description, rules }) => ({
       id, name, description,
       rules: rules.map(({ id, name, description }) => ({ id, name, description })),
     })),
+    getViews: () => loadedViews.map(({ id, name, description, filter }) => ({
+      id, name, description,
+      filter: filter.toString(),
+    })),
+    getActiveViewId: () => activeViewId,
+    setActiveViewId,
     enableProxy: (input) => configureHostProxy(input),
     disableProxy: () => disableHostProxy(),
     proxyStatus: () => readHostProxySettings(),
@@ -127,7 +153,10 @@ const main = Effect.gen(function* (_) {
   yield* _(
     watchRules(rulesDirUrl, () => {
       void Effect.runPromise(
-        loadRulesEffect.pipe(Effect.tap(() => Effect.sync(() => eventBus.emit(listRulesEvent()))))
+        loadRulesEffect.pipe(Effect.tap(() => Effect.sync(() => {
+          eventBus.emit(listRulesEvent());
+          eventBus.emit(listViewsEvent());
+        })))
       );
     })
   );

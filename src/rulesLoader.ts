@@ -1,4 +1,4 @@
-import type { LoadedScenario, ScenarioFactory } from "./rules";
+import type { LoadedScenario, ScenarioFactory, LoadedView, ViewFactory } from "./rules";
 import { Effect } from "effect";
 import { watch, existsSync } from "node:fs";
 import { RulesLoadError } from "./errors";
@@ -6,7 +6,8 @@ import { RulesLoadError } from "./errors";
 export function loadScenarios(
   rulesDirUrl: URL,
   setLoadedScenarios: (scenarios: LoadedScenario[]) => void,
-  setActiveScenarioId: (id: string | null) => void
+  setActiveScenarioId: (id: string | null) => void,
+  setLoadedViews: (views: LoadedView[]) => void
 ) {
   return Effect.gen(function* (_) {
     const ruleFiles = yield* _(
@@ -18,6 +19,7 @@ export function loadScenarios(
     if (!dir) {
       setLoadedScenarios([]);
       setActiveScenarioId(null);
+      setLoadedViews([]);
       return;
     }
 
@@ -27,6 +29,7 @@ export function loadScenarios(
       )
     );
     const scenarios: LoadedScenario[] = [];
+    const views: LoadedView[] = [];
 
     for (const entry of entries) {
       const filePath = `${ruleFiles}/${entry}`;
@@ -40,14 +43,21 @@ export function loadScenarios(
         const scenario = factory();
         scenarios.push({ ...scenario, filePath });
       }
+      const exportedViews = (module.views ?? []) as ViewFactory[];
+      for (const factory of exportedViews) {
+        const view = factory();
+        views.push({ ...view, filePath });
+      }
     }
 
     setLoadedScenarios(scenarios);
+    setLoadedViews(views);
   }).pipe(
     Effect.catchAll(() =>
       Effect.sync(() => {
         setLoadedScenarios([]);
         setActiveScenarioId(null);
+        setLoadedViews([]);
       })
     )
   );

@@ -26,3 +26,31 @@ export type ProxyScenario = {
 export type ScenarioFactory = () => ProxyScenario;
 
 export type LoadedScenario = ProxyScenario & { filePath: string };
+
+// ── Views (custom filters) ──
+
+/** Context available to a view filter — covers both request and response data. */
+export type ViewContext = {
+  id: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  status?: number;
+  responseHeaders?: Record<string, string>;
+  durationMs?: number;
+  mocked?: boolean;
+};
+
+/** A view filter predicate. Return true to include the request. */
+export type ViewFilter = (context: ViewContext) => boolean;
+
+export type ViewInstance = {
+  id: string;
+  name: string;
+  description?: string;
+  filter: ViewFilter;
+};
+
+export type ViewFactory = () => ViewInstance;
+
+export type LoadedView = ViewInstance & { filePath: string };

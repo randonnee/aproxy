@@ -1,4 +1,4 @@
-import type { RulesListEvent, ProxyEvent, SimulatorEvent } from "./models";
+import type { RulesListEvent, ViewsListEvent, ProxyEvent, SimulatorEvent } from "./models";
 import type { EventBus } from "./eventBus";
 import { Effect } from "effect";
 
@@ -26,8 +26,9 @@ export function headersToRecord(headers: Headers) {
 
 export function createSseStream(
   abortSignal: AbortSignal,
-  eventBus: EventBus<ProxyEvent | RulesListEvent | SimulatorEvent>,
-  listRulesEvent: () => RulesListEvent
+  eventBus: EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>,
+  listRulesEvent: () => RulesListEvent,
+  listViewsEvent: () => ViewsListEvent
 ) {
   const sseClients = new Set<ReadableStreamDefaultController<string>>();
   const unsubscribe = eventBus.on((event) => emitSse(event, sseClients));
@@ -37,6 +38,7 @@ export function createSseStream(
       sseClients.add(controller);
       controller.enqueue("data: {\"type\":\"hello\",\"status\":\"ok\"}\n\n");
       controller.enqueue(`data: ${JSON.stringify(listRulesEvent())}\n\n`);
+      controller.enqueue(`data: ${JSON.stringify(listViewsEvent())}\n\n`);
 
       abortSignal.addEventListener(
         "abort",

@@ -1,4 +1,4 @@
-import type { RulesListEvent, SimulatorInfo, ProxyEvent } from "./models";
+import type { RulesListEvent, ViewsListEvent, SimulatorInfo, ProxyEvent } from "./models";
 import type { CaCert } from "./ca";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
@@ -50,12 +50,16 @@ export function createServer(
 export function createRoutes(
   deps: {
     listRulesEvent: () => RulesListEvent;
+    listViewsEvent: () => ViewsListEvent;
     loadRules: () => Effect.Effect<void, RequestError | unknown>;
     handleProxy: (req: Request) => Effect.Effect<Response, unknown>;
     createSse: (signal: AbortSignal) => ReadableStream<string>;
     getScenarios: () => Array<{ id: string; name: string; description?: string; rules: Array<{ id: string; name?: string; description?: string }> }>;
     getActiveScenarioId: () => string | null;
     setActiveScenarioId: (id: string | null) => void;
+    getViews: () => Array<{ id: string; name: string; description?: string; filter: string }>;
+    getActiveViewId: () => string | null;
+    setActiveViewId: (id: string | null) => void;
     enableProxy: (input: {
       proxyHost: string;
       proxyPort: number;
@@ -157,6 +161,27 @@ export function createRoutes(
       if (isControlRequest && url?.pathname === "/rules/reload" && req.method === "POST") {
         yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
         return Response.json(deps.listRulesEvent());
+      }
+
+      // --- Views (custom filters) ---
+      if (isControlRequest && url?.pathname === "/views" && req.method === "GET") {
+        return Response.json({
+          views: deps.getViews(),
+          activeViewId: deps.getActiveViewId()
+        });
+      }
+
+      if (isControlRequest && url?.pathname === "/views/active" && req.method === "PUT") {
+        const body = yield* _(
+          parseJsonBody<{ viewId: string | null }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        deps.setActiveViewId(body.viewId ?? null);
+        return Response.json({
+          views: deps.getViews(),
+          activeViewId: deps.getActiveViewId()
+        });
       }
 
       if (isControlRequest && url?.pathname === "/proxy/enable" && req.method === "POST") {
@@ -283,7 +308,8 @@ export function createRoutes(
 export function createSse(
   eventBus: { on: (listener: (event: { type: string }) => void) => () => void },
   listRulesEvent: () => RulesListEvent,
+  listViewsEvent: () => ViewsListEvent,
   signal: AbortSignal
 ) {
-  return createSseStream(signal, eventBus as any, listRulesEvent);
+  return createSseStream(signal, eventBus as any, listRulesEvent, listViewsEvent);
 }
