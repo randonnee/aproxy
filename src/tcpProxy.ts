@@ -9,10 +9,11 @@ import { handleMitm } from "./mitm";
  * State machine for each client connection.
  *
  * "parsing"  – accumulating the initial HTTP request line + headers
+ * "body"     – headers parsed, accumulating request body bytes
  * "tunnel"   – CONNECT established, bidirectional pipe active
  * "http"     – dispatched to the fetch handler
  */
-type ConnectionState = "parsing" | "tunnel" | "http";
+type ConnectionState = "parsing" | "body" | "tunnel" | "http";
 
 type SocketData = {
   state: ConnectionState;
@@ -22,6 +23,16 @@ type SocketData = {
   peer: Socket<any> | null;
   /** Data buffered before upstream connects */
   pendingData: Buffer[];
+  /** Parsed header section (set when transitioning to "body" state) */
+  headerSection?: string;
+  /** HTTP method (set when transitioning to "body" state) */
+  method?: string;
+  /** HTTP target (set when transitioning to "body" state) */
+  target?: string;
+  /** Body bytes accumulated so far */
+  bodyBuffer?: Buffer;
+  /** Expected Content-Length */
+  expectedBodyLength?: number;
 };
 
 type FetchHandler = (req: Request) => Effect.Effect<Response, any>;
@@ -75,6 +86,23 @@ export function createTcpProxy(opts: {
           return;
         }
 
+        if (socket.data.state === "body") {
+          // Accumulating body bytes
+          socket.data.bodyBuffer = Buffer.concat([socket.data.bodyBuffer!, Buffer.from(data)]);
+          if (socket.data.bodyBuffer.length >= socket.data.expectedBodyLength!) {
+            socket.data.state = "http";
+            handleHttpRequest(
+              socket,
+              socket.data.headerSection!,
+              socket.data.bodyBuffer,
+              socket.data.method!,
+              socket.data.target!,
+              fetchHandler
+            );
+          }
+          return;
+        }
+
         // Parsing mode: accumulate bytes and look for end of headers
         socket.data.buffer = Buffer.concat([socket.data.buffer, Buffer.from(data)]);
         const headerEnd = socket.data.buffer.indexOf("\r\n\r\n");
@@ -112,8 +140,26 @@ export function createTcpProxy(opts: {
             handleConnect(socket, host, targetPort, pending, emitEvent);
           }
         } else {
-          socket.data.state = "http";
-          handleHttpRequest(socket, headerSection, bodyStart, method, target, fetchHandler);
+          // Check if we need to wait for body bytes
+          const contentLengthHeader = headerSection.split("\r\n").find(
+            (l) => l.toLowerCase().startsWith("content-length:")
+          );
+          const expectedBodyLength = contentLengthHeader
+            ? parseInt(contentLengthHeader.split(":")[1].trim(), 10)
+            : 0;
+
+          if (expectedBodyLength > 0 && bodyStart.length < expectedBodyLength) {
+            // Body hasn't fully arrived yet — transition to "body" state
+            socket.data.state = "body";
+            socket.data.headerSection = headerSection;
+            socket.data.method = method;
+            socket.data.target = target;
+            socket.data.bodyBuffer = Buffer.from(bodyStart);
+            socket.data.expectedBodyLength = expectedBodyLength;
+          } else {
+            socket.data.state = "http";
+            handleHttpRequest(socket, headerSection, bodyStart, method, target, fetchHandler);
+          }
         }
       },
 

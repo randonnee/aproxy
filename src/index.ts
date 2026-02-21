@@ -204,4 +204,10 @@ const main = Effect.gen(function* (_) {
   console.log(`Proxy listening on :${proxyPort} (MITM enabled)`);
 });
 
-await Effect.runPromise(main);
+export function startProxy() {
+  return Effect.runPromise(main);
+}
+
+if (import.meta.main) {
+  await Effect.runPromise(main);
+}

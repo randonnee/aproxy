@@ -10,12 +10,15 @@ import { createSseStream, parseJsonBody } from "./http";
 import { createTcpProxy } from "./tcpProxy";
 
 // Resolve UI dist directory (built React app)
-const uiDistDir = join(import.meta.dir, "..", "ui", "dist");
+// APROXY_UI_DIR: set by Electrobun entry to point at bundled UI files.
+// Standalone: resolve relative to source tree.
+const uiDistDir = process.env.APROXY_UI_DIR ?? join(import.meta.dir, "..", "ui", "dist");
 const uiIndexPath = join(uiDistDir, "index.html");
-const uiFallbackPath = new URL("./ui.html", import.meta.url);
+const uiFallbackPath = join(import.meta.dir, "ui.html");
 
 // Resolve bundled examples directory
-const examplesDir = join(import.meta.dir, "..", "examples");
+// APROXY_EXAMPLES_DIR: set by Electrobun entry to point at bundled examples.
+const examplesDir = process.env.APROXY_EXAMPLES_DIR ?? join(import.meta.dir, "..", "examples");
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
