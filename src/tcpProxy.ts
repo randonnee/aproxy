@@ -1,7 +1,9 @@
 import type { Socket } from "bun";
 import type { ProxyEvent } from "./models";
+import type { CaCert } from "./ca";
 import { Effect } from "effect";
 import { handleConnect } from "./tunnel";
+import { handleMitm } from "./mitm";
 
 /**
  * State machine for each client connection.
@@ -37,8 +39,10 @@ export function createTcpProxy(opts: {
   hostname: string;
   fetchHandler: FetchHandler;
   emitEvent: (event: ProxyEvent) => void;
+  /** When provided, CONNECT tunnels are intercepted with MITM instead of blind piping */
+  ca?: CaCert;
 }) {
-  const { port, hostname, fetchHandler, emitEvent } = opts;
+  const { port, hostname, fetchHandler, emitEvent, ca } = opts;
 
   return Bun.listen<SocketData>({
     hostname,
@@ -95,14 +99,18 @@ export function createTcpProxy(opts: {
           const host = colonIdx > 0 ? target.substring(0, colonIdx) : target;
           const targetPort = colonIdx > 0 ? parseInt(target.substring(colonIdx + 1), 10) : 443;
 
-          console.log(`[tunnel] CONNECT ${host}:${targetPort}`);
+          console.log(`[tunnel] CONNECT ${host}:${targetPort}${ca ? " (MITM)" : ""}`);
 
           const pending: Buffer[] = [];
           if (bodyStart.length > 0) {
             pending.push(Buffer.from(bodyStart));
           }
 
-          handleConnect(socket, host, targetPort, pending, emitEvent);
+          if (ca) {
+            handleMitm(socket, host, targetPort, pending, emitEvent, ca, fetchHandler);
+          } else {
+            handleConnect(socket, host, targetPort, pending, emitEvent);
+          }
         } else {
           socket.data.state = "http";
           handleHttpRequest(socket, headerSection, bodyStart, method, target, fetchHandler);

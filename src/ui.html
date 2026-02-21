@@ -222,6 +222,64 @@
         background: rgba(71, 215, 172, 0.15);
         color: var(--accent);
       }
+      .sim-entry-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sim-entry-row .sim-entry {
+        flex: 1;
+        min-width: 0;
+      }
+      .sim-trust-btn {
+        flex-shrink: 0;
+        font-size: 10px;
+        padding: 2px 7px;
+      }
+      .sim-trust-btn.trusted {
+        color: var(--accent);
+        border-color: rgba(71, 215, 172, 0.3);
+        cursor: default;
+        opacity: 0.7;
+      }
+
+      /* CA certificate section */
+      .ca-status-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .ca-status-row .label {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .ca-status-row .state {
+        font-size: 11px;
+        font-family: var(--mono);
+        padding: 3px 8px;
+        border-radius: 4px;
+      }
+      .ca-status-row .state.trusted {
+        background: rgba(71, 215, 172, 0.15);
+        color: var(--accent);
+      }
+      .ca-status-row .state.untrusted {
+        background: rgba(255, 184, 79, 0.15);
+        color: var(--warn);
+      }
+      .ca-actions {
+        display: flex;
+        gap: 6px;
+      }
+      .ca-actions button { flex: 1; }
+      .ca-note {
+        font-size: 10px;
+        color: var(--ink-faint);
+        margin-top: 6px;
+        line-height: 1.4;
+      }
 
       /* ── Content area ── */
       .content {
@@ -557,6 +615,20 @@
           </div>
         </div>
 
+        <!-- CA Certificate -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">CA Certificate</div>
+          <div class="ca-status-row">
+            <span class="label">Host Trust</span>
+            <span class="state untrusted" id="caState">...</span>
+          </div>
+          <div class="ca-actions">
+            <button class="primary" id="trustCaBtn">Trust on Mac</button>
+            <button id="downloadCaBtn">Download</button>
+          </div>
+          <div class="ca-note" id="caNote"></div>
+        </div>
+
         <!-- Scenarios -->
         <div class="sidebar-section">
           <div class="sidebar-title">Scenarios</div>
@@ -663,6 +735,10 @@
       const refreshSimBtn = document.getElementById("refreshSimBtn");
       const resizeHandle = document.getElementById("resizeHandle");
       const detailTabs = document.querySelectorAll(".detail-tab");
+      const caState = document.getElementById("caState");
+      const trustCaBtn = document.getElementById("trustCaBtn");
+      const downloadCaBtn = document.getElementById("downloadCaBtn");
+      const caNote = document.getElementById("caNote");
 
       // ── Helpers ──
       const maxRequests = 500;
@@ -727,6 +803,66 @@
           const data = await res.json();
           updateProxyState(data.enabled);
         } catch {}
+      });
+
+      // ── CA Certificate ──
+      let caTrustedOnHost = false;
+
+      async function fetchCaTrustStatus() {
+        try {
+          const res = await fetch("/ca/trust/status");
+          const data = await res.json();
+          caTrustedOnHost = data.trusted;
+          updateCaState(caTrustedOnHost);
+        } catch {
+          updateCaState(false);
+        }
+      }
+
+      function updateCaState(trusted) {
+        caState.textContent = trusted ? "Trusted" : "Not Trusted";
+        caState.className = "state " + (trusted ? "trusted" : "untrusted");
+        trustCaBtn.textContent = trusted ? "Trusted" : "Trust on Mac";
+        trustCaBtn.disabled = trusted;
+        if (trusted) {
+          trustCaBtn.classList.remove("primary");
+        } else {
+          trustCaBtn.classList.add("primary");
+        }
+        caNote.textContent = trusted ? "" : "Will prompt for admin password";
+      }
+
+      trustCaBtn.addEventListener("click", async () => {
+        if (caTrustedOnHost) return;
+        trustCaBtn.textContent = "Trusting...";
+        trustCaBtn.disabled = true;
+        try {
+          const res = await fetch("/ca/trust", { method: "POST" });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.trusted) {
+              caTrustedOnHost = true;
+              updateCaState(true);
+              return;
+            }
+          }
+          // Request failed — refresh status in case it was actually trusted
+          await fetchCaTrustStatus();
+          if (!caTrustedOnHost) {
+            trustCaBtn.textContent = "Failed";
+            setTimeout(() => updateCaState(false), 2000);
+          }
+        } catch {
+          await fetchCaTrustStatus();
+          if (!caTrustedOnHost) {
+            trustCaBtn.textContent = "Failed";
+            setTimeout(() => updateCaState(false), 2000);
+          }
+        }
+      });
+
+      downloadCaBtn.addEventListener("click", () => {
+        window.open("/ca/cert", "_blank");
       });
 
       // ── Scenarios ──
@@ -807,13 +943,56 @@
         }
         simList.innerHTML = "";
         activeSimulators.forEach(sim => {
+          const row = document.createElement("div");
+          row.className = "sim-entry-row";
+
           const el = document.createElement("div");
           el.className = "sim-entry";
           el.innerHTML = `
             <span class="sim-name">${esc(sim.name)}</span>
             <span class="sim-badge booted">${esc(sim.state)}</span>
           `;
-          simList.appendChild(el);
+
+          const trustBtn = document.createElement("button");
+          trustBtn.className = "sim-trust-btn" + (sim.caTrusted ? " trusted" : " primary");
+          trustBtn.textContent = sim.caTrusted ? "Trusted" : "Trust CA";
+          if (!sim.caTrusted) {
+            trustBtn.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              trustBtn.textContent = "...";
+              trustBtn.disabled = true;
+              try {
+                const res = await fetch("/simulators/trust-ca", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ udid: sim.udid }),
+                });
+                if (res.ok) {
+                  sim.caTrusted = true;
+                  trustBtn.textContent = "Trusted";
+                  trustBtn.className = "sim-trust-btn trusted";
+                } else {
+                  trustBtn.textContent = "Failed";
+                  trustBtn.disabled = false;
+                  setTimeout(() => {
+                    trustBtn.textContent = "Trust CA";
+                    trustBtn.className = "sim-trust-btn primary";
+                  }, 2000);
+                }
+              } catch {
+                trustBtn.textContent = "Failed";
+                trustBtn.disabled = false;
+                setTimeout(() => {
+                  trustBtn.textContent = "Trust CA";
+                  trustBtn.className = "sim-trust-btn primary";
+                }, 2000);
+              }
+            });
+          }
+
+          row.appendChild(el);
+          row.appendChild(trustBtn);
+          simList.appendChild(row);
         });
       }
 
@@ -1056,6 +1235,7 @@
 
       // ── Init ──
       fetch("/proxy/status").then(r => r.json()).then(p => updateProxyState(p.enabled)).catch(() => {});
+      fetchCaTrustStatus();
       fetchScenarios();
       fetchSimulators();
       startSSE();

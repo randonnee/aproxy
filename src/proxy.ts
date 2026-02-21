@@ -72,7 +72,6 @@ export function computeProxyOutcome(
         new Request(targetRequest.url, {
           method: targetRequest.method,
           headers: targetRequest.headers,
-          body: targetRequest.body
         })
       )
     );
@@ -172,7 +171,26 @@ export function handleHttpProxy(
     return outcome.response;
   }).pipe(
     Effect.catchAll((error) => {
-      const message = error instanceof Error ? error.message : "Unknown proxy error";
+      let message = "Unknown proxy error";
+      try {
+        if (error instanceof Error) {
+          message = error.message;
+        } else if (typeof error === "object" && error !== null) {
+          const e = error as any;
+          if (e.cause instanceof Error) {
+            message = e.cause.message;
+          } else if (e.cause?.cause instanceof Error) {
+            message = e.cause.cause.message;
+          } else if (e.cause) {
+            message = String(e.cause);
+          } else {
+            message = JSON.stringify(error);
+          }
+        } else {
+          message = String(error);
+        }
+      } catch {}
+      console.error(`[proxy] error for ${req.method} ${req.url}:`, message);
       const errorEvent: ProxyEvent = {
         type: "error",
         id,

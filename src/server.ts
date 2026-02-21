@@ -1,7 +1,8 @@
 import type { RulesListEvent, SimulatorInfo, ProxyEvent } from "./models";
+import type { CaCert } from "./ca";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
-import { RequestError } from "./errors";
+import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
 import { createTcpProxy } from "./tcpProxy";
 
@@ -32,14 +33,16 @@ const getPreferredHost = () => {
  */
 export function createServer(
   fetchHandler: (req: Request) => Effect.Effect<Response, RequestError>,
-  emitEvent: (event: ProxyEvent) => void
+  emitEvent: (event: ProxyEvent) => void,
+  ca?: CaCert
 ) {
   return Effect.try(() =>
     createTcpProxy({
       hostname: process.env.HOST ?? "0.0.0.0",
       port: Number(process.env.PROXY_PORT ?? 8080),
       fetchHandler,
-      emitEvent
+      emitEvent,
+      ca,
     })
   ).pipe(Effect.mapError((cause) => new RequestError({ cause })));
 }
@@ -56,16 +59,21 @@ export function createRoutes(
     enableProxy: (input: {
       proxyHost: string;
       proxyPort: number;
-    }) => Effect.Effect<{ networkService: string; proxyHost: string; proxyPort: number; enabled: boolean }, RequestError | unknown>;
-    disableProxy: () => Effect.Effect<{ networkService: string; enabled: boolean }, RequestError | unknown>;
+    }) => Effect.Effect<{ networkService: string; proxyHost: string; proxyPort: number; enabled: boolean }, CommandError>;
+    disableProxy: () => Effect.Effect<{ networkService: string; enabled: boolean }, CommandError>;
     proxyStatus: () => Effect.Effect<{
       settings: Record<string, string>;
       raw: string;
       networkService: string;
       enabled: boolean;
-    }, RequestError | unknown>;
-    listSimulators: () => Effect.Effect<SimulatorInfo[], RequestError | unknown>;
-    installSimulatorCert: (input: { udid: string; certPath: string }) => Effect.Effect<SimulatorInfo, RequestError | unknown>;
+    }, CommandError>;
+    listSimulators: () => Effect.Effect<SimulatorInfo[], CommandError>;
+    installSimulatorCert: (input: { udid: string; certPath: string }) => Effect.Effect<SimulatorInfo, CommandError>;
+    getCaCertPem: () => string | null;
+    getCaCertPath: () => string | null;
+    trustCaOnHost: () => Effect.Effect<{ trusted: boolean; certPath: string }, CommandError>;
+    isCaTrusted: () => Effect.Effect<boolean, never>;
+    installCaOnSimulator: (udid: string) => Effect.Effect<SimulatorInfo, CommandError>;
   }
 ) {
   const controlHosts = listLocalHosts();
@@ -196,6 +204,62 @@ export function createRoutes(
         return Response.json({ simulator, certPath: body.certPath });
       }
 
+      // --- CA certificate endpoints ---
+      if (isControlRequest && url?.pathname === "/ca/cert" && req.method === "GET") {
+        const pem = deps.getCaCertPem();
+        if (!pem) {
+          return Response.json({ error: "CA not initialized" }, { status: 503 });
+        }
+        return new Response(pem, {
+          headers: {
+            "Content-Type": "application/x-pem-file",
+            "Content-Disposition": "attachment; filename=\"aproxy-ca.pem\"",
+          },
+        });
+      }
+
+      if (isControlRequest && url?.pathname === "/ca/status" && req.method === "GET") {
+        const certPath = deps.getCaCertPath();
+        return Response.json({
+          initialized: certPath !== null,
+          certPath,
+          trustCommand: certPath
+            ? `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certPath}`
+            : null,
+        });
+      }
+
+      if (isControlRequest && url?.pathname === "/ca/trust" && req.method === "POST") {
+        // Check if already trusted before attempting
+        const alreadyTrusted = yield* _(
+          deps.isCaTrusted().pipe(Effect.catchAll(() => Effect.succeed(false)))
+        );
+        if (alreadyTrusted) {
+          return Response.json({ trusted: true, alreadyTrusted: true });
+        }
+        const result = yield* _(
+          deps.trustCaOnHost().pipe(Effect.mapError((cause) => new RequestError({ cause })))
+        );
+        return Response.json(result);
+      }
+
+      if (isControlRequest && url?.pathname === "/ca/trust/status" && req.method === "GET") {
+        const trusted = yield* _(deps.isCaTrusted());
+        return Response.json({ trusted });
+      }
+
+      if (isControlRequest && url?.pathname === "/simulators/trust-ca" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ udid: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const simulator = yield* _(
+          deps.installCaOnSimulator(body.udid).pipe(Effect.mapError((cause) => new RequestError({ cause })))
+        );
+        return Response.json({ simulator });
+      }
+
       // If we reach here for a control-host request, it means no route matched.
       // Return 404 instead of falling through to the proxy handler, which would
       // create an infinite loop when the system proxy is enabled (the proxy would
@@ -205,7 +269,15 @@ export function createRoutes(
       }
 
       return yield* _(deps.handleProxy(req));
-    }).pipe(Effect.catchAll(() => Effect.sync(() => new Response("Request error", { status: 400 }))));
+    }).pipe(Effect.catchAll((err) => Effect.sync(() => {
+      const message = err instanceof CommandError
+        ? err.message
+        : err instanceof RequestError
+          ? String((err as any).cause ?? err)
+          : String(err);
+      console.error(`[route error] ${message}`);
+      return Response.json({ error: message }, { status: 400 });
+    })));
 }
 
 export function createSse(

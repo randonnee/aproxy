@@ -1,6 +1,6 @@
 # aproxy
 
-Local HTTP/HTTPS proxy built with Bun. Intercepts traffic on macOS, displays requests in a web UI, and supports rule-based response mocking.
+Local HTTP/HTTPS proxy built with Bun. Intercepts traffic on macOS with MITM SSL decryption, displays requests in a web UI, and supports rule-based response mocking.
 
 ## Quick start
 
@@ -21,24 +21,27 @@ PROXY_PORT=8888 bun run dev
 
 ## Architecture
 
-The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handles both HTTP proxy requests and HTTPS CONNECT tunneling.
+The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handles both HTTP proxy requests and HTTPS CONNECT tunneling with MITM SSL decryption.
 
 - **HTTP requests** are parsed and dispatched through an Effect-based route handler (control routes and upstream proxy).
-- **CONNECT requests** establish a bidirectional TCP tunnel to the target host, allowing HTTPS traffic to pass through without decryption.
+- **CONNECT requests** are intercepted via MITM: an ephemeral TLS server is started with a per-host certificate signed by the auto-generated CA. Decrypted traffic flows through the same proxy/rules pipeline as HTTP and appears in the web UI. A blind tunnel fallback is used when no CA is configured.
 
 Key source files:
 
 - `src/index.ts` — entry point, wires dependencies
 - `src/tcpProxy.ts` — raw TCP listener, HTTP parsing, CONNECT detection
-- `src/tunnel.ts` — CONNECT tunnel handler (bidirectional TCP pipe via `Bun.connect`)
+- `src/tunnel.ts` — CONNECT tunnel handler (blind TCP pipe fallback via `Bun.connect`)
+- `src/mitm.ts` — MITM tunnel handler (TLS termination, decrypted HTTP parsing, proxy pipeline reuse)
+- `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions
 - `src/server.ts` — route definitions (control API + proxy dispatch)
 - `src/proxy.ts` — HTTP proxy forwarding with rule evaluation
 - `src/http.ts` — SSE stream creation, header utilities
-- `src/simulators.ts` — iOS simulator listing, cert install, host proxy config via `networksetup`
+- `src/simulators.ts` — iOS simulator listing, cert install, host proxy config, CA trust. All functions return `Effect<T, CommandError>`
 - `src/eventBus.ts` — generic pub/sub for SSE events
 - `src/models.ts` — TypeScript event/model types
 - `src/rules.ts` — rule type definitions
 - `src/rulesLoader.ts` — rule file loading and hot-reload watching
+- `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
 - `src/ui.html` — single-page web UI
 
 ## Web UI
@@ -86,6 +89,18 @@ Endpoints:
 
 - `GET /simulators` — list available iOS simulators
 - `POST /simulators/certs` — install a root cert in a booted simulator's keychain
+- `POST /simulators/trust-ca` — install the aproxy CA cert on a booted simulator (body: `{ "udid": "..." }`)
+
+## CA certificate management (REST)
+
+A root CA is auto-generated on first run and stored at `~/.aproxy/`. Per-host leaf certificates are generated on-the-fly for MITM interception. To avoid TLS errors, the CA must be trusted on the host (and on any iOS simulators).
+
+Endpoints:
+
+- `GET /ca/cert` — download the CA certificate PEM file
+- `GET /ca/status` — check if CA is initialized, get cert path and trust command
+- `POST /ca/trust` — trust the CA in the macOS system keychain (requires sudo, will prompt for password)
+- `GET /ca/trust/status` — check if the CA is already trusted on the host
 
 ### Examples
 
@@ -123,6 +138,38 @@ curl -s -X POST http://localhost:8080/simulators/certs \
   -d '{"udid":"SIMULATOR_UDID","certPath":"/absolute/path/to/ca.pem"}'
 ```
 
+Check CA status:
+
+```bash
+curl -s http://localhost:8080/ca/status | jq
+```
+
+Check if CA is trusted on host:
+
+```bash
+curl -s http://localhost:8080/ca/trust/status | jq
+```
+
+Trust the CA on macOS (will prompt for sudo password):
+
+```bash
+curl -s -X POST http://localhost:8080/ca/trust
+```
+
+Download the CA certificate:
+
+```bash
+curl -s http://localhost:8080/ca/cert -o aproxy-ca.pem
+```
+
+Install CA on an iOS simulator:
+
+```bash
+curl -s -X POST http://localhost:8080/simulators/trust-ca \
+  -H "Content-Type: application/json" \
+  -d '{"udid":"SIMULATOR_UDID"}'
+```
+
 Stream events:
 
 ```bash
@@ -143,10 +190,10 @@ curl -s -X PUT http://localhost:8080/scenarios/active \
   -d '{"scenarioId":"mock-api"}'
 ```
 
-Test HTTPS tunneling:
+Test HTTPS interception (MITM):
 
 ```bash
-curl -x http://localhost:8080 https://httpbin.org/get
+curl -x http://localhost:8080 --cacert ~/.aproxy/ca.pem https://httpbin.org/get
 ```
 
 ## Rules
@@ -184,7 +231,31 @@ export const scenarios: ScenarioFactory[] = [
 ];
 ```
 
+## Error handling
+
+All shell command operations (`openssl`, `networksetup`, `xcrun simctl`, `osascript`) are typed with `CommandError` from `src/errors.ts`. When a command fails, the API returns a descriptive JSON error with `command`, `args`, `stderr`, and `exitCode` instead of a generic "Request error" string.
+
+Example error response:
+
+```json
+{
+  "error": "networksetup -setwebproxy Wi-Fi 10.0.0.1 8080 exited with 1: ** Error: ..."
+}
+```
+
+Error types:
+
+- `CommandError` — shell command failures (subprocess exit code != 0)
+- `RequestError` — wraps errors at the route handler level
+- `ProxyError` — proxy forwarding errors
+- `CertError` — certificate-related errors
+- `RulesLoadError` — rule file loading errors
+
+All simulator, proxy, and CA operations in `src/simulators.ts` and `src/ca.ts` return Effect-TS effects with typed `CommandError` channels, ensuring errors propagate through the pipeline with full context.
+
 ## Notes
 
-- HTTP proxy and HTTPS CONNECT tunneling are fully supported.
-- CONNECT tunneling is a blind TCP pipe — traffic is not decrypted (no MITM). MITM interception with certificate generation is planned next.
+- HTTP proxy and HTTPS MITM interception are fully supported.
+- HTTPS traffic is decrypted via per-host certificates signed by an auto-generated CA. Decrypted requests flow through the same rule pipeline as HTTP and appear in the web UI.
+- The CA must be trusted on the host (`POST /ca/trust`) and on any iOS simulators (`POST /simulators/trust-ca`) for TLS to succeed without errors.
+- The blind tunnel (`src/tunnel.ts`) is used as a fallback when no CA is configured.

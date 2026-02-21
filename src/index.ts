@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { ProxyEvent, RulesListEvent, SimulatorEvent } from "./models";
 import type { LoadedScenario } from "./rules";
+import type { CaCert } from "./ca";
 import { EventBus } from "./eventBus";
 import { ProxyError } from "./errors";
 import { createRoutes, createServer, createSse } from "./server";
@@ -9,11 +10,14 @@ import {
   disableHostProxy,
   readHostProxySettings,
   installSimulatorCertificate,
-  listSimulators
+  listSimulators,
+  trustCaCertOnHost,
+  isCaTrustedOnHost,
 } from "./simulators";
 import { loadScenarios, watchRules } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
 import { type RuleHandler } from "./rules";
+import { ensureCa } from "./ca";
 
 const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | SimulatorEvent>();
@@ -60,6 +64,9 @@ const applyRules = (context: { id: string; url: string; method: string; headers:
 const handleProxy = (req: Request) => handleHttpProxy(req, (event) => eventBus.emit(event), applyRules);
 
 const main = Effect.gen(function* (_) {
+  // Initialize the CA for MITM SSL interception
+  const ca: CaCert = yield* _(ensureCa());
+
   const loadRulesEffect = loadScenarios(rulesDirUrl, setLoadedScenarios, setActiveScenarioId);
   const routes = createRoutes({
     listRulesEvent,
@@ -69,27 +76,17 @@ const main = Effect.gen(function* (_) {
     getActiveScenarioId: () => activeScenarioId,
     setActiveScenarioId,
     getScenarios: () => loadedScenarios.map(({ id, name, description }) => ({ id, name, description })),
-    enableProxy: (input: { proxyHost: string; proxyPort: number }) =>
-      Effect.tryPromise(() => configureHostProxy(input)).pipe(
-        Effect.mapError((cause) => new ProxyError({ cause }))
-      ),
-    disableProxy: () =>
-      Effect.tryPromise(() => disableHostProxy()).pipe(
-        Effect.mapError((cause) => new ProxyError({ cause }))
-      ),
-    proxyStatus: () =>
-      Effect.tryPromise(() => readHostProxySettings()).pipe(
-        Effect.mapError((cause) => new ProxyError({ cause }))
-      ),
+    enableProxy: (input) => configureHostProxy(input),
+    disableProxy: () => disableHostProxy(),
+    proxyStatus: () => readHostProxySettings(),
     listSimulators: () =>
-      Effect.tryPromise(() => listSimulators()).pipe(
+      listSimulators().pipe(
         Effect.tap((simulators) =>
           Effect.sync(() => eventBus.emit({ type: "simulators_list", simulators }))
         ),
-        Effect.mapError((cause) => new ProxyError({ cause }))
       ),
-    installSimulatorCert: (input: { udid: string; certPath: string }) =>
-      Effect.tryPromise(() => installSimulatorCertificate(input)).pipe(
+    installSimulatorCert: (input) =>
+      installSimulatorCertificate(input).pipe(
         Effect.tap((simulator) =>
           Effect.sync(() =>
             eventBus.emit({
@@ -101,11 +98,28 @@ const main = Effect.gen(function* (_) {
             })
           )
         ),
-        Effect.mapError((cause) => new ProxyError({ cause }))
-      )
+      ),
+    getCaCertPem: () => ca.certPem,
+    getCaCertPath: () => ca.certPath,
+    trustCaOnHost: () => trustCaCertOnHost(ca.certPath),
+    isCaTrusted: () => isCaTrustedOnHost("aproxy CA"),
+    installCaOnSimulator: (udid) =>
+      installSimulatorCertificate({ udid, certPath: ca.certPath }).pipe(
+        Effect.tap((simulator) =>
+          Effect.sync(() =>
+            eventBus.emit({
+              type: "simulator_configured",
+              simulator,
+              proxyHost: "",
+              proxyPort: 0,
+              certPath: ca.certPath,
+            })
+          )
+        ),
+      ),
   });
 
-  yield* _(createServer(routes, (event) => eventBus.emit(event)));
+  yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
   yield* _(loadRulesEffect);
   yield* _(
     watchRules(rulesDirUrl, () => {
@@ -114,7 +128,7 @@ const main = Effect.gen(function* (_) {
       );
     })
   );
-  console.log(`Proxy listening on :${proxyPort}`);
+  console.log(`Proxy listening on :${proxyPort} (MITM enabled)`);
 });
 
 await Effect.runPromise(main);
