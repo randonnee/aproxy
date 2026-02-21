@@ -61,6 +61,7 @@ Event types (in the JSON `data` payload):
 - `simulators_list` — available iOS simulators
 - `simulator_configured` — simulator cert installed
 - `simulator_error` — simulator operation failed
+- `views_list` — available views and active view ID
 
 ## System proxy control (REST)
 
@@ -194,6 +195,100 @@ Test HTTPS interception (MITM):
 
 ```bash
 curl -x http://localhost:8080 --cacert ~/.aproxy/ca.pem https://httpbin.org/get
+```
+
+## Custom Views
+
+Views are named filter predicates that narrow which requests are displayed in the web UI. They are defined in rule files alongside scenarios and applied client-side — they do not affect proxy behavior or rule evaluation.
+
+### Defining views
+
+Export a `views` array of `ViewFactory` functions from any file in `rules/`:
+
+```ts
+import type { ViewFactory } from "../src/rules";
+
+export const views: ViewFactory[] = [
+  () => ({
+    id: "errors-only",
+    name: "Errors Only",
+    description: "Show only requests with 4xx/5xx status codes",
+    filter: (ctx) => (ctx.status ?? 0) >= 400,
+  }),
+  () => ({
+    id: "api-calls",
+    name: "API Calls",
+    description: "Show only requests containing /api/ in the URL",
+    filter: (ctx) => /\/api\//.test(ctx.url),
+  }),
+];
+```
+
+The filter function receives a `ViewContext`:
+
+```ts
+type ViewContext = {
+  id: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  status?: number;
+  responseHeaders?: Record<string, string>;
+  durationMs?: number;
+  mocked?: boolean;
+};
+```
+
+Return `true` to include the request in the view, `false` to hide it.
+
+### How it works
+
+1. Views are loaded from `rules/*.ts` files at startup (alongside scenarios) and hot-reloaded on file changes.
+2. The web UI sidebar shows a "Views" section listing all loaded views plus an "All requests" option.
+3. Selecting a view sends `PUT /views/active` to the server, which broadcasts a `views_list` SSE event to all connected clients.
+4. The filter function source is serialized as a string and compiled client-side via `new Function`, then applied to the request list.
+
+### Endpoints
+
+- `GET /views` — list all views and the active view ID
+- `PUT /views/active` — set the active view (body: `{ "viewId": "errors-only" }` or `{ "viewId": null }` to clear)
+
+### SSE event
+
+A `views_list` event is emitted when a new SSE client connects and whenever rule files are reloaded:
+
+```json
+{
+  "type": "views_list",
+  "views": [
+    { "id": "errors-only", "name": "Errors Only", "description": "...", "filter": "(ctx) => (ctx.status ?? 0) >= 400" }
+  ],
+  "activeViewId": "errors-only"
+}
+```
+
+### Examples
+
+List views:
+
+```bash
+curl -s http://localhost:8080/views | jq
+```
+
+Set active view:
+
+```bash
+curl -s -X PUT http://localhost:8080/views/active \
+  -H "Content-Type: application/json" \
+  -d '{"viewId":"errors-only"}'
+```
+
+Clear active view:
+
+```bash
+curl -s -X PUT http://localhost:8080/views/active \
+  -H "Content-Type: application/json" \
+  -d '{"viewId":null}'
 ```
 
 ## Rules

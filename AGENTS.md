@@ -54,6 +54,7 @@ Current event types:
 - `simulators_list` — available iOS simulators
 - `simulator_configured` — simulator cert installed
 - `simulator_error` — simulator operation failed
+- `views_list` — available views and active view ID
 
 Keep this contract stable unless the user explicitly asks to change it.
 
@@ -105,6 +106,41 @@ The CA is auto-generated on first run and stored at `~/.aproxy/`. API endpoints 
 - MITM SSL interception is implemented. Decrypted HTTPS traffic flows through the same rule pipeline as HTTP.
 - CA certificate generation and trust management are implemented for both macOS host and iOS simulators.
 - For simulator proxy config: proxy is already host-level via `networksetup`; no per-simulator config needed.
+- Custom views are implemented. Views are client-side filter predicates defined in rule files that narrow the request list in the web UI. They do not affect proxy behavior.
+
+## Custom views
+
+Views are named filter functions exported from rule files (`rules/*.ts`) that control which requests appear in the web UI. They are purely a display concern — they do not affect proxy behavior, rule evaluation, or traffic interception.
+
+### Data flow
+
+1. Rule files export `views: ViewFactory[]` alongside `scenarios`. Each factory returns a `ViewInstance` with `id`, `name`, optional `description`, and a `filter: (ctx: ViewContext) => boolean` predicate.
+2. `src/rulesLoader.ts` loads views from all rule files, producing `LoadedView[]` (view + `filePath`).
+3. `src/index.ts` stores loaded views and `activeViewId` in module-level state, and constructs `views_list` events for the event bus.
+4. `src/server.ts` exposes `GET /views` and `PUT /views/active` endpoints.
+5. `src/http.ts` sends the initial `views_list` event when a new SSE client connects.
+6. The web UI (`src/ui.html`) renders views in the sidebar, compiles the filter source string via `new Function`, and applies it client-side to filter the request list.
+
+### Key types (`src/rules.ts`)
+
+- `ViewContext` — the data available to a filter: `id`, `url`, `method`, `headers`, `status?`, `responseHeaders?`, `durationMs?`, `mocked?`
+- `ViewFilter` — `(context: ViewContext) => boolean`
+- `ViewInstance` — `{ id, name, description?, filter }`
+- `ViewFactory` — `() => ViewInstance`
+- `LoadedView` — `ViewInstance & { filePath: string }`
+
+### API endpoints
+
+- `GET /views` — returns `{ views, activeViewId }`
+- `PUT /views/active` — body `{ "viewId": "..." | null }`, returns updated state and broadcasts `views_list` via SSE
+
+### Hot-reload
+
+Views are reloaded alongside scenarios when rule files change. The `watchRules` watcher re-runs the loader and emits both `rules_list` and `views_list` events.
+
+### Client-side filter compilation
+
+The filter function is serialized via `.toString()` and sent to the client as a string. The UI compiles it with `new Function("return (" + view.filter + ")")()`. If compilation or execution fails, the filter is skipped and the request is included.
 
 ## Error handling
 
