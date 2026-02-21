@@ -5951,11 +5951,11 @@ await __promiseAll([
 ]);
 
 // src/bun/index.ts
-import { join as join10 } from "path";
+import { resolve as resolve3 } from "path";
 var PROXY_PORT = Number(process.env.PROXY_PORT ?? 8080);
-var appDir = join10(import.meta.dir, "..");
-process.env.APROXY_UI_DIR = join10(appDir, "views", "mainview");
-process.env.APROXY_EXAMPLES_DIR = join10(appDir, "examples");
+var resourcesDir = resolve3("../Resources/app");
+process.env.APROXY_UI_DIR = resolve3(resourcesDir, "views", "mainview");
+process.env.APROXY_EXAMPLES_DIR = resolve3(resourcesDir, "examples");
 var { startProxy: startProxy2 } = await init_src().then(() => exports_src);
 await startProxy2();
 var mainWindow = new BrowserWindow({

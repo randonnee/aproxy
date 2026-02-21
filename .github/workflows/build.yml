@@ -1,0 +1,37 @@
+name: Build Desktop App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install UI dependencies
+        run: bun install
+        working-directory: ui
+
+      - name: Build desktop app
+        run: bunx electrobun build --env=stable
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aproxy-macos-arm64
+          path: artifacts/stable-macos-arm64-Aproxy.dmg
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aproxy-app-macos-arm64
+          path: build/stable-macos-arm64/Aproxy.app

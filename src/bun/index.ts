@@ -1,16 +1,14 @@
 import { BrowserWindow, ApplicationMenu, Utils } from "electrobun/bun";
-
-import { join } from "node:path";
+import { resolve } from "node:path";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT ?? 8080);
 
-// Resolve resource paths relative to the Electrobun bundle.
-// import.meta.dir = .app/Contents/Resources/app/bun/
-// UI files are copied to .app/Contents/Resources/app/views/mainview/
-// Examples are copied to .app/Contents/Resources/app/examples/
-const appDir = join(import.meta.dir, "..");
-process.env.APROXY_UI_DIR = join(appDir, "views", "mainview");
-process.env.APROXY_EXAMPLES_DIR = join(appDir, "examples");
+// Resolve resource paths relative to the Electrobun app bundle.
+// The launcher always sets cwd to .app/Contents/MacOS/, so resolve("../Resources/")
+// works reliably in both dev and production builds (including ASAR extraction).
+const resourcesDir = resolve("../Resources/app");
+process.env.APROXY_UI_DIR = resolve(resourcesDir, "views", "mainview");
+process.env.APROXY_EXAMPLES_DIR = resolve(resourcesDir, "examples");
 
 // Dynamic import so env vars are set before server.ts resolves paths
 const { startProxy } = await import("../index");
