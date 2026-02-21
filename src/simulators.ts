@@ -1,5 +1,8 @@
 import { Effect } from "effect";
 import { CommandError } from "./errors";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { existsSync } from "node:fs";
 
 export type SimulatorInfo = {
   udid: string;
@@ -8,6 +11,7 @@ export type SimulatorInfo = {
   runtime: string;
   available: boolean;
   isBooted: boolean;
+  caTrusted?: boolean;
 };
 
 type SimctlDevice = {
@@ -221,6 +225,44 @@ export function trustCaCertOnHost(certPath: string): Effect.Effect<{ trusted: bo
 export function isCaTrustedOnHost(cn: string): Effect.Effect<boolean, never> {
   return runCommand("security", ["find-certificate", "-c", cn, "/Library/Keychains/System.keychain"]).pipe(
     Effect.map(() => true),
+    Effect.catchAll(() => Effect.succeed(false)),
+  );
+}
+
+/**
+ * Get the SHA256 fingerprint of a certificate file (hex, lowercase).
+ */
+export function getCertSha256(certPath: string): Effect.Effect<string, CommandError> {
+  return runCommand("openssl", ["x509", "-in", certPath, "-noout", "-fingerprint", "-sha256"]).pipe(
+    Effect.map((output) => {
+      // Output: "sha256 Fingerprint=AA:BB:CC:..." or "SHA256 Fingerprint=AA:BB:CC:..."
+      const hex = output.replace(/.*=/, "").replace(/:/g, "").trim().toUpperCase();
+      return hex;
+    }),
+  );
+}
+
+/**
+ * Check whether a CA certificate is installed on an iOS simulator by checking
+ * its TrustStore SQLite database for a matching SHA256 fingerprint.
+ */
+export function isCaInstalledOnSimulator(udid: string, certSha256: string): Effect.Effect<boolean, never> {
+  const trustStorePath = join(
+    homedir(),
+    "Library/Developer/CoreSimulator/Devices",
+    udid,
+    "data/private/var/protected/trustd/private/TrustStore.sqlite3"
+  );
+
+  if (!existsSync(trustStorePath)) {
+    return Effect.succeed(false);
+  }
+
+  return runCommand("sqlite3", [
+    trustStorePath,
+    `SELECT count(*) FROM tsettings WHERE hex(sha256) = '${certSha256}'`,
+  ]).pipe(
+    Effect.map((output) => parseInt(output.trim(), 10) > 0),
     Effect.catchAll(() => Effect.succeed(false)),
   );
 }

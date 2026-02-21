@@ -506,18 +506,10 @@ body {
 
 /* Simulator list in sidebar */
 .sim-entry {
-  padding: 0.45rem 0.65rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
   font-size: 0.85rem;
-  transition: background 0.15s var(--ease-out);
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.sim-entry:hover {
-  background: var(--accent-subtle);
 }
 
 .sim-entry .sim-name {
@@ -540,10 +532,22 @@ body {
   color: var(--success);
 }
 
+.sim-badge.trusted {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
 .sim-entry-row {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s var(--ease-out);
+}
+
+.sim-entry-row:hover {
+  background: var(--accent-subtle);
 }
 
 .sim-entry-row .sim-entry {

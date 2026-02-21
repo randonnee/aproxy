@@ -46,6 +46,7 @@ export type SimulatorInfo = {
   runtime: string;
   available: boolean;
   isBooted: boolean;
+  caTrusted?: boolean;
 };
 
 export type SimulatorsListEvent = {

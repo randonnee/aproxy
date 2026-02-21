@@ -13,6 +13,8 @@ import {
   listSimulators,
   trustCaCertOnHost,
   isCaTrustedOnHost,
+  getCertSha256,
+  isCaInstalledOnSimulator,
 } from "./simulators";
 import { loadScenarios, loadViews, watchDir } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
@@ -27,6 +29,7 @@ const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | Sim
 let loadedScenarios: LoadedScenario[] = [];
 let activeScenarioId: string | null = null;
 let loadedViews: LoadedView[] = [];
+let proxyEnabled = false;
 let config: AproxyConfig = loadConfig();
 const aproxyDir = join(homedir(), ".aproxy");
 const scenariosDir = join(aproxyDir, "scenarios");
@@ -75,6 +78,7 @@ const updateConfig = (patch: Partial<AproxyConfig>) => {
 
 const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
   Effect.gen(function* (_) {
+    if (!proxyEnabled) return null;
     const activeScenario = loadedScenarios.find((scenario) => scenario.id === activeScenarioId);
     const rules = activeScenario?.rules ?? [];
     for (const rule of rules) {
@@ -117,15 +121,32 @@ const main = Effect.gen(function* (_) {
     })),
     getConfig,
     updateConfig,
-    enableProxy: (input) => configureHostProxy(input),
-    disableProxy: () => disableHostProxy(),
-    proxyStatus: () => readHostProxySettings(),
+    enableProxy: (input) => configureHostProxy(input).pipe(
+      Effect.tap(() => Effect.sync(() => { proxyEnabled = true; }))
+    ),
+    disableProxy: () => disableHostProxy().pipe(
+      Effect.tap(() => Effect.sync(() => { proxyEnabled = false; }))
+    ),
+    proxyStatus: () => readHostProxySettings().pipe(
+      Effect.tap((result) => Effect.sync(() => { proxyEnabled = result.enabled; }))
+    ),
     listSimulators: () =>
-      listSimulators().pipe(
-        Effect.tap((simulators) =>
-          Effect.sync(() => eventBus.emit({ type: "simulators_list", simulators }))
-        ),
-      ),
+      Effect.gen(function* (_) {
+        const simulators = yield* _(listSimulators());
+        const sha256 = yield* _(getCertSha256(ca.certPath).pipe(Effect.catchAll(() => Effect.succeed(""))));
+        if (sha256) {
+          const booted = simulators.filter((s) => s.isBooted);
+          const trustChecks = yield* _(
+            Effect.all(
+              booted.map((s) => isCaInstalledOnSimulator(s.udid, sha256)),
+              { concurrency: "unbounded" }
+            )
+          );
+          booted.forEach((s, i) => { s.caTrusted = trustChecks[i]; });
+        }
+        eventBus.emit({ type: "simulators_list", simulators });
+        return simulators;
+      }),
     installSimulatorCert: (input) =>
       installSimulatorCertificate(input).pipe(
         Effect.tap((simulator) =>
@@ -162,6 +183,12 @@ const main = Effect.gen(function* (_) {
 
   yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
   yield* _(loadAllRules);
+
+  // Sync initial proxy state
+  yield* _(readHostProxySettings().pipe(
+    Effect.tap((result) => Effect.sync(() => { proxyEnabled = result.enabled; })),
+    Effect.catchAll(() => Effect.succeed(undefined))
+  ));
 
   const emitReload = () => {
     void Effect.runPromise(

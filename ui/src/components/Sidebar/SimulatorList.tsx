@@ -89,15 +89,18 @@ function SimulatorEntry({
     <div className="sim-entry-row">
       <div className="sim-entry">
         <span className="sim-name">{sim.name}</span>
-        <span className="sim-badge booted">{sim.state}</span>
       </div>
-      <button
-        className={`sim-trust-btn${sim.caTrusted ? " trusted" : " primary"}`}
-        onClick={handleTrust}
-        disabled={sim.caTrusted || busy}
-      >
-        {label ?? (sim.caTrusted ? "Trusted" : "Trust CA")}
-      </button>
+      {sim.caTrusted ? (
+        <span className="sim-badge trusted">CA Trusted</span>
+      ) : (
+        <button
+          className="sim-trust-btn primary"
+          onClick={handleTrust}
+          disabled={busy}
+        >
+          {label ?? "Trust CA"}
+        </button>
+      )}
     </div>
   );
 }
