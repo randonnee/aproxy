@@ -1,4 +1,4 @@
-import type { RulesListEvent } from "./models";
+import type { RulesListEvent, SimulatorInfo } from "./models";
 import { Effect } from "effect";
 import { RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
@@ -21,6 +21,13 @@ export function createRoutes(
     getScenarios: () => Array<{ id: string; name: string; description?: string }>;
     getActiveScenarioId: () => string | null;
     setActiveScenarioId: (id: string | null) => void;
+    listSimulators: () => Effect.Effect<SimulatorInfo[], RequestError | unknown>;
+    configureSimulator: (input: {
+      udid: string;
+      proxyHost: string;
+      proxyPort: number;
+    }) => Effect.Effect<SimulatorInfo, RequestError | unknown>;
+    installSimulatorCert: (input: { udid: string; certPath: string }) => Effect.Effect<SimulatorInfo, RequestError | unknown>;
   }
 ) {
   return (req: Request) =>
@@ -67,6 +74,37 @@ export function createRoutes(
       if (url.pathname === "/rules/reload" && req.method === "POST") {
         yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
         return Response.json(deps.listRulesEvent());
+      }
+
+      if (url.pathname === "/simulators" && req.method === "GET") {
+        const simulators = yield* _(
+          deps.listSimulators().pipe(Effect.mapError((cause) => new RequestError({ cause })))
+        );
+        return Response.json({ simulators });
+      }
+
+      if (url.pathname === "/simulators/configure" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ udid: string; proxyHost: string; proxyPort: number }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const simulator = yield* _(
+          deps.configureSimulator(body).pipe(Effect.mapError((cause) => new RequestError({ cause })))
+        );
+        return Response.json({ simulator, proxyHost: body.proxyHost, proxyPort: body.proxyPort });
+      }
+
+      if (url.pathname === "/simulators/certs" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ udid: string; certPath: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const simulator = yield* _(
+          deps.installSimulatorCert(body).pipe(Effect.mapError((cause) => new RequestError({ cause })))
+        );
+        return Response.json({ simulator, certPath: body.certPath });
       }
 
       if (req.method === "CONNECT") return new Response("CONNECT not implemented yet", { status: 501 });

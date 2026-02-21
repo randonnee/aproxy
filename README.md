@@ -29,6 +29,9 @@ Events:
 - `response`
 - `error`
 - `rules_list`
+- `simulators_list`
+- `simulator_configured`
+- `simulator_error`
 
 ## Rule control (REST)
 
@@ -40,6 +43,14 @@ Endpoints:
 - `PUT /scenarios/active` set the active scenario id
 - `GET /rules` list rules for the active scenario
 - `POST /rules/reload` reload scenario files from disk
+
+## Simulator control (REST)
+
+Endpoints:
+
+- `GET /simulators` list available simulators
+- `POST /simulators/configure` set HTTP/HTTPS proxy for a booted simulator
+- `POST /simulators/certs` add a root cert to a booted simulator keychain
 
 ### Examples
 
@@ -67,6 +78,28 @@ Stream events:
 
 ```bash
 curl -N http://localhost:8080/events
+```
+
+List simulators:
+
+```bash
+curl -s http://localhost:8080/simulators | jq
+```
+
+Configure a simulator proxy:
+
+```bash
+curl -s -X POST http://localhost:8080/simulators/configure \
+  -H "Content-Type: application/json" \
+  -d '{"udid":"SIMULATOR_UDID","proxyHost":"127.0.0.1","proxyPort":8080}'
+```
+
+Install a root cert in a simulator:
+
+```bash
+curl -s -X POST http://localhost:8080/simulators/certs \
+  -H "Content-Type: application/json" \
+  -d '{"udid":"SIMULATOR_UDID","certPath":"/absolute/path/to/ca.pem"}'
 ```
 
 ## Rules
@@ -107,4 +140,4 @@ export const scenarios: ScenarioFactory[] = [
 ## Notes
 
 - This initial core only supports HTTP proxying (absolute-form and origin-form requests).
-- HTTPS tunneling via `CONNECT`, certificate generation, and simulator configuration are planned next.
+- HTTPS tunneling via `CONNECT` and certificate generation are planned next.

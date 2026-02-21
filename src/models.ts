@@ -30,3 +30,36 @@ export type RulesListEvent = {
   rules: Array<{ id: string; name?: string; description?: string }>;
   activeRuleIds: string[];
 };
+
+export type SimulatorInfo = {
+  udid: string;
+  name: string;
+  state: string;
+  runtime: string;
+  available: boolean;
+  isBooted: boolean;
+};
+
+export type SimulatorsListEvent = {
+  type: "simulators_list";
+  simulators: SimulatorInfo[];
+};
+
+export type SimulatorConfigEvent = {
+  type: "simulator_configured";
+  simulator: SimulatorInfo;
+  proxyHost: string;
+  proxyPort: number;
+  certPath?: string;
+};
+
+export type SimulatorErrorEvent = {
+  type: "simulator_error";
+  message: string;
+  timestamp: number;
+};
+
+export type SimulatorEvent =
+  | SimulatorsListEvent
+  | SimulatorConfigEvent
+  | SimulatorErrorEvent;

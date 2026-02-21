@@ -1,4 +1,4 @@
-import type { RulesListEvent, ProxyEvent } from "./models";
+import type { RulesListEvent, ProxyEvent, SimulatorEvent } from "./models";
 import type { EventBus } from "./eventBus";
 import { Effect } from "effect";
 
@@ -26,7 +26,7 @@ export function headersToRecord(headers: Headers) {
 
 export function createSseStream(
   abortSignal: AbortSignal,
-  eventBus: EventBus<ProxyEvent | RulesListEvent>,
+  eventBus: EventBus<ProxyEvent | RulesListEvent | SimulatorEvent>,
   listRulesEvent: () => RulesListEvent
 ) {
   const sseClients = new Set<ReadableStreamDefaultController<string>>();
