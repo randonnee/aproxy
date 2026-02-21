@@ -55,7 +55,8 @@ export function computeProxyOutcome(
         headers: headersToRecord(responseHeaders),
         durationMs: Date.now() - startedAt,
         timestamp: Date.now(),
-        body: bodyText
+        body: bodyText,
+        mocked: true
       };
       return { response: ruleResponse, event: responseEvent };
     }

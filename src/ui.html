@@ -67,9 +67,12 @@
       .conn-dot {
         width: 8px; height: 8px;
         border-radius: 50%;
+        background: var(--ink-faint);
+        flex-shrink: 0;
+      }
+      .conn-dot.active {
         background: var(--accent);
         box-shadow: 0 0 8px rgba(71, 215, 172, 0.5);
-        flex-shrink: 0;
       }
       .conn-dot.disconnected {
         background: var(--error);
@@ -129,27 +132,11 @@
         font-size: 13px;
         font-weight: 500;
       }
-      .proxy-status .state {
-        font-size: 11px;
-        font-family: var(--mono);
-        padding: 3px 8px;
-        border-radius: 4px;
-      }
-      .proxy-status .state.on {
-        background: rgba(71, 215, 172, 0.15);
-        color: var(--accent);
-      }
-      .proxy-status .state.off {
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--ink-muted);
-      }
-      .proxy-actions {
-        display: flex;
-        gap: 6px;
+      .proxy-toggle {
         margin-top: 8px;
       }
-      .proxy-actions button {
-        flex: 1;
+      .proxy-toggle button {
+        width: 100%;
       }
 
       /* Scenario list */
@@ -196,6 +183,30 @@
         display: block;
         width: 100%;
         margin-top: 8px;
+      }
+
+      /* Rule list within a scenario */
+      .rule-list {
+        margin-top: 6px;
+        margin-left: 14px;
+        padding-left: 8px;
+        border-left: 1px solid var(--border);
+      }
+      .rule-item {
+        padding: 4px 0;
+        font-size: 12px;
+        color: var(--ink-muted);
+      }
+      .rule-item .rule-name {
+        font-weight: 500;
+        color: var(--ink);
+        font-size: 12px;
+      }
+      .rule-item .rule-desc {
+        font-size: 10px;
+        color: var(--ink-faint);
+        margin-top: 1px;
+        line-height: 1.3;
       }
 
       /* Simulator list in sidebar */
@@ -437,6 +448,17 @@
       .status-5xx { color: var(--error); }
       .status-pending { color: var(--ink-faint); }
 
+      /* Mocked row highlight */
+      .request-table tbody tr.mocked {
+        background: rgba(196, 155, 255, 0.06);
+      }
+      .request-table tbody tr.mocked td {
+        color: #c49bff;
+      }
+      .request-table tbody tr.mocked:hover {
+        background: rgba(196, 155, 255, 0.1);
+      }
+
       /* ── Detail panel ── */
       .detail-panel {
         height: var(--detail-h);
@@ -605,13 +627,8 @@
         <!-- Proxy status -->
         <div class="sidebar-section">
           <div class="sidebar-title">System Proxy</div>
-          <div class="proxy-status">
-            <span class="label">Proxy</span>
-            <span class="state off" id="proxyState">OFF</span>
-          </div>
-          <div class="proxy-actions">
-            <button class="primary" id="enableProxyBtn">Enable</button>
-            <button id="disableProxyBtn">Disable</button>
+          <div class="proxy-toggle">
+            <button id="proxyToggleBtn">Enable Proxy</button>
           </div>
         </div>
 
@@ -728,9 +745,7 @@
       const detailContent = document.getElementById("detailContent");
       const scenarioList = document.getElementById("scenarioList");
       const simList = document.getElementById("simList");
-      const proxyState = document.getElementById("proxyState");
-      const enableProxyBtn = document.getElementById("enableProxyBtn");
-      const disableProxyBtn = document.getElementById("disableProxyBtn");
+      const proxyToggleBtn = document.getElementById("proxyToggleBtn");
       const reloadRulesBtn = document.getElementById("reloadRulesBtn");
       const refreshSimBtn = document.getElementById("refreshSimBtn");
       const resizeHandle = document.getElementById("resizeHandle");
@@ -765,15 +780,29 @@
       }
 
       // ── Connection status ──
-      function setConnected(val) {
-        connected = val;
-        connDot.className = "conn-dot" + (val ? "" : " disconnected");
+      function updateConnDot() {
+        if (!connected) {
+          connDot.className = "conn-dot disconnected";
+        } else if (proxyEnabled) {
+          connDot.className = "conn-dot active";
+        } else {
+          connDot.className = "conn-dot";
+        }
       }
 
-      // ── Proxy status ──
-      function updateProxyState(enabled) {
-        proxyState.textContent = enabled ? "ON" : "OFF";
-        proxyState.className = "state " + (enabled ? "on" : "off");
+      function setConnected(val) {
+        connected = val;
+        updateConnDot();
+      }
+
+      // ── Proxy toggle ──
+      let proxyEnabled = false;
+
+      function updateProxyToggle(enabled) {
+        proxyEnabled = enabled;
+        proxyToggleBtn.textContent = enabled ? "Disable Proxy" : "Enable Proxy";
+        proxyToggleBtn.className = enabled ? "danger" : "primary";
+        updateConnDot();
       }
 
       async function getPreferredHost() {
@@ -784,25 +813,25 @@
         } catch { return "127.0.0.1"; }
       }
 
-      enableProxyBtn.addEventListener("click", async () => {
+      proxyToggleBtn.addEventListener("click", async () => {
+        proxyToggleBtn.disabled = true;
         try {
-          const host = await getPreferredHost();
-          const res = await fetch("/proxy/enable", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ proxyHost: host, proxyPort: 8080 })
-          });
-          const data = await res.json();
-          updateProxyState(data.enabled);
+          if (proxyEnabled) {
+            const res = await fetch("/proxy/disable", { method: "POST" });
+            const data = await res.json();
+            updateProxyToggle(data.enabled);
+          } else {
+            const host = await getPreferredHost();
+            const res = await fetch("/proxy/enable", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ proxyHost: host, proxyPort: 8080 })
+            });
+            const data = await res.json();
+            updateProxyToggle(data.enabled);
+          }
         } catch {}
-      });
-
-      disableProxyBtn.addEventListener("click", async () => {
-        try {
-          const res = await fetch("/proxy/disable", { method: "POST" });
-          const data = await res.json();
-          updateProxyState(data.enabled);
-        } catch {}
+        proxyToggleBtn.disabled = false;
       });
 
       // ── CA Certificate ──
@@ -900,6 +929,18 @@
             desc.className = "scenario-desc";
             desc.textContent = s.description;
             scenarioList.appendChild(desc);
+          }
+          if (s.id === activeScenarioId && s.rules && s.rules.length) {
+            const ruleList = document.createElement("div");
+            ruleList.className = "rule-list";
+            s.rules.forEach(r => {
+              const ruleEl = document.createElement("div");
+              ruleEl.className = "rule-item";
+              ruleEl.innerHTML = `<div class="rule-name">${esc(r.name || r.id)}</div>`
+                + (r.description ? `<div class="rule-desc">${esc(r.description)}</div>` : "");
+              ruleList.appendChild(ruleEl);
+            });
+            scenarioList.appendChild(ruleList);
           }
         });
       }
@@ -1030,9 +1071,12 @@
           const duration = res ? `${res.durationMs}ms` : (err ? "err" : "");
           const time = formatTime(req.timestamp);
 
+          const mocked = res?.mocked;
+
           const tr = document.createElement("tr");
           tr.dataset.id = id;
           if (id === selectedId) tr.classList.add("selected");
+          if (mocked) tr.classList.add("mocked");
           tr.innerHTML = `
             <td class="col-method"><span class="method method-${esc(req.method)}">${esc(req.method)}</span></td>
             <td class="col-status"><span class="${typeof status === 'number' ? statusClass(status) : (err ? 'status-5xx' : 'status-pending')}">${status}</span></td>
@@ -1086,6 +1130,9 @@
         if (res) {
           html += row("Status", res.status);
           html += row("Duration", res.durationMs + "ms");
+          if (res.mocked) {
+            html += row("Source", "Mocked");
+          }
         }
         if (err) {
           html += row("Error", err.message);
@@ -1234,7 +1281,7 @@
       });
 
       // ── Init ──
-      fetch("/proxy/status").then(r => r.json()).then(p => updateProxyState(p.enabled)).catch(() => {});
+      fetch("/proxy/status").then(r => r.json()).then(p => updateProxyToggle(p.enabled)).catch(() => {});
       fetchCaTrustStatus();
       fetchScenarios();
       fetchSimulators();

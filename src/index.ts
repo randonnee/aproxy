@@ -75,7 +75,10 @@ const main = Effect.gen(function* (_) {
     createSse: (signal) => createSse(eventBus, listRulesEvent, signal),
     getActiveScenarioId: () => activeScenarioId,
     setActiveScenarioId,
-    getScenarios: () => loadedScenarios.map(({ id, name, description }) => ({ id, name, description })),
+    getScenarios: () => loadedScenarios.map(({ id, name, description, rules }) => ({
+      id, name, description,
+      rules: rules.map(({ id, name, description }) => ({ id, name, description })),
+    })),
     enableProxy: (input) => configureHostProxy(input),
     disableProxy: () => disableHostProxy(),
     proxyStatus: () => readHostProxySettings(),

@@ -15,6 +15,7 @@ export type ResponseEvent = {
   durationMs: number;
   timestamp: number;
   body?: string;
+  mocked?: boolean;
 };
 
 export type ErrorEvent = {

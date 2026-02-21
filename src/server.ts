@@ -53,7 +53,7 @@ export function createRoutes(
     loadRules: () => Effect.Effect<void, RequestError | unknown>;
     handleProxy: (req: Request) => Effect.Effect<Response, unknown>;
     createSse: (signal: AbortSignal) => ReadableStream<string>;
-    getScenarios: () => Array<{ id: string; name: string; description?: string }>;
+    getScenarios: () => Array<{ id: string; name: string; description?: string; rules: Array<{ id: string; name?: string; description?: string }> }>;
     getActiveScenarioId: () => string | null;
     setActiveScenarioId: (id: string | null) => void;
     enableProxy: (input: {

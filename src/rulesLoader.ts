@@ -1,6 +1,6 @@
 import type { LoadedScenario, ScenarioFactory } from "./rules";
 import { Effect } from "effect";
-import { watch } from "node:fs";
+import { watch, existsSync } from "node:fs";
 import { RulesLoadError } from "./errors";
 
 export function loadScenarios(
@@ -14,11 +14,7 @@ export function loadScenarios(
         Effect.mapError((cause) => new RulesLoadError({ cause }))
       )
     );
-    const dir = yield* _(
-      Effect.tryPromise(() => Bun.file(ruleFiles).exists()).pipe(
-        Effect.mapError((cause) => new RulesLoadError({ cause }))
-      )
-    );
+    const dir = existsSync(ruleFiles);
     if (!dir) {
       setLoadedScenarios([]);
       setActiveScenarioId(null);
@@ -47,7 +43,6 @@ export function loadScenarios(
     }
 
     setLoadedScenarios(scenarios);
-    if (scenarios.length > 0) setActiveScenarioId(scenarios[0].id);
   }).pipe(
     Effect.catchAll(() =>
       Effect.sync(() => {
@@ -68,11 +63,7 @@ export function watchRules(
         Effect.mapError((cause) => new RulesLoadError({ cause }))
       )
     );
-    const exists = yield* _(
-      Effect.tryPromise(() => Bun.file(rulesDir).exists()).pipe(
-        Effect.mapError((cause) => new RulesLoadError({ cause }))
-      )
-    );
+    const exists = existsSync(rulesDir);
     if (!exists) return;
     let debounce: ReturnType<typeof setTimeout> | null = null;
     watch(rulesDir, { recursive: false }, () => {
