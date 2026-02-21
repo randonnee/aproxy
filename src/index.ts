@@ -18,13 +18,14 @@ import { loadScenarios, watchRules } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
 import { type RuleHandler } from "./rules";
 import { ensureCa } from "./ca";
+import { loadConfig, saveConfig, type AproxyConfig } from "./config";
 
 const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
 let loadedScenarios: LoadedScenario[] = [];
 let activeScenarioId: string | null = null;
 let loadedViews: LoadedView[] = [];
-let activeViewId: string | null = null;
+let config: AproxyConfig = loadConfig();
 const rulesDirUrl = new URL("../rules", import.meta.url);
 
 const listRulesEvent = (): RulesListEvent => ({
@@ -45,7 +46,7 @@ const listViewsEvent = (): ViewsListEvent => ({
     id, name, description,
     filter: filter.toString(),
   })),
-  activeViewId,
+  defaultViewId: config.defaultViewId,
 });
 
 
@@ -61,8 +62,11 @@ const setLoadedViews = (views: LoadedView[]) => {
   loadedViews = views;
 };
 
-const setActiveViewId = (id: string | null) => {
-  activeViewId = id;
+const getConfig = () => config;
+
+const updateConfig = (patch: Partial<AproxyConfig>) => {
+  config = { ...config, ...patch };
+  saveConfig(config);
 };
 
 const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
@@ -103,8 +107,8 @@ const main = Effect.gen(function* (_) {
       id, name, description,
       filter: filter.toString(),
     })),
-    getActiveViewId: () => activeViewId,
-    setActiveViewId,
+    getConfig,
+    updateConfig,
     enableProxy: (input) => configureHostProxy(input),
     disableProxy: () => disableHostProxy(),
     proxyStatus: () => readHostProxySettings(),

@@ -1,5 +1,6 @@
 import type { RulesListEvent, ViewsListEvent, SimulatorInfo, ProxyEvent } from "./models";
 import type { CaCert } from "./ca";
+import type { AproxyConfig } from "./config";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
 import { CommandError, RequestError } from "./errors";
@@ -58,8 +59,8 @@ export function createRoutes(
     getActiveScenarioId: () => string | null;
     setActiveScenarioId: (id: string | null) => void;
     getViews: () => Array<{ id: string; name: string; description?: string; filter: string }>;
-    getActiveViewId: () => string | null;
-    setActiveViewId: (id: string | null) => void;
+    getConfig: () => AproxyConfig;
+    updateConfig: (patch: Partial<AproxyConfig>) => void;
     enableProxy: (input: {
       proxyHost: string;
       proxyPort: number;
@@ -167,20 +168,20 @@ export function createRoutes(
       if (isControlRequest && url?.pathname === "/views" && req.method === "GET") {
         return Response.json({
           views: deps.getViews(),
-          activeViewId: deps.getActiveViewId()
+          defaultViewId: deps.getConfig().defaultViewId,
         });
       }
 
-      if (isControlRequest && url?.pathname === "/views/active" && req.method === "PUT") {
+      if (isControlRequest && url?.pathname === "/views/default" && req.method === "PUT") {
         const body = yield* _(
           parseJsonBody<{ viewId: string | null }>(req).pipe(
             Effect.mapError((cause) => new RequestError({ cause }))
           )
         );
-        deps.setActiveViewId(body.viewId ?? null);
+        deps.updateConfig({ defaultViewId: body.viewId ?? null });
         return Response.json({
           views: deps.getViews(),
-          activeViewId: deps.getActiveViewId()
+          defaultViewId: deps.getConfig().defaultViewId,
         });
       }
 

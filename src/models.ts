@@ -36,7 +36,7 @@ export type RulesListEvent = {
 export type ViewsListEvent = {
   type: "views_list";
   views: Array<{ id: string; name: string; description?: string; filter: string }>;
-  activeViewId: string | null;
+  defaultViewId: string | null;
 };
 
 export type SimulatorInfo = {

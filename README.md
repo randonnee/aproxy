@@ -42,6 +42,7 @@ Key source files:
 - `src/rules.ts` — rule type definitions
 - `src/rulesLoader.ts` — rule file loading and hot-reload watching
 - `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save
 - `src/ui.html` — single-page web UI
 
 ## Web UI
@@ -250,8 +251,14 @@ Return `true` to include the request in the view, `false` to hide it.
 
 ### Endpoints
 
-- `GET /views` — list all views and the active view ID
-- `PUT /views/active` — set the active view (body: `{ "viewId": "errors-only" }` or `{ "viewId": null }` to clear)
+- `GET /views` — list all views and the default view ID
+- `PUT /views/default` — set the default view (body: `{ "viewId": "errors-only" }` or `{ "viewId": null }` to clear). The default view is persisted to `~/.aproxy/config.json` and automatically activated when the UI loads.
+
+### Default view
+
+You can mark a view as the default so it is automatically activated when the UI loads. The default is stored in `~/.aproxy/config.json` and can be set from the web UI (select a view, then click "set default") or via the REST API.
+
+The active view is purely client-side state. Manually selecting a different view takes precedence over the default for the current session.
 
 ### SSE event
 
@@ -263,7 +270,7 @@ A `views_list` event is emitted when a new SSE client connects and whenever rule
   "views": [
     { "id": "errors-only", "name": "Errors Only", "description": "...", "filter": "(ctx) => (ctx.status ?? 0) >= 400" }
   ],
-  "activeViewId": "errors-only"
+  "defaultViewId": "errors-only"
 }
 ```
 
@@ -275,18 +282,18 @@ List views:
 curl -s http://localhost:8080/views | jq
 ```
 
-Set active view:
+Set default view:
 
 ```bash
-curl -s -X PUT http://localhost:8080/views/active \
+curl -s -X PUT http://localhost:8080/views/default \
   -H "Content-Type: application/json" \
   -d '{"viewId":"errors-only"}'
 ```
 
-Clear active view:
+Clear default view:
 
 ```bash
-curl -s -X PUT http://localhost:8080/views/active \
+curl -s -X PUT http://localhost:8080/views/default \
   -H "Content-Type: application/json" \
   -d '{"viewId":null}'
 ```

@@ -28,9 +28,10 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 - `src/rules.ts` — rule type definitions
 - `src/rulesLoader.ts` — rule file loading and hot-reload watching
 - `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId`
 - `src/ui.html` — single-page web UI
 - `rules/` — user-defined scenario/rule files
-- `~/.aproxy/` — runtime directory for CA cert (`ca.pem`), key (`ca-key.pem`), and temp files
+- `~/.aproxy/` — runtime directory for CA cert (`ca.pem`), key (`ca-key.pem`), config (`config.json`), and temp files
 
 ## Development constraints
 
@@ -116,8 +117,8 @@ Views are named filter functions exported from rule files (`rules/*.ts`) that co
 
 1. Rule files export `views: ViewFactory[]` alongside `scenarios`. Each factory returns a `ViewInstance` with `id`, `name`, optional `description`, and a `filter: (ctx: ViewContext) => boolean` predicate.
 2. `src/rulesLoader.ts` loads views from all rule files, producing `LoadedView[]` (view + `filePath`).
-3. `src/index.ts` stores loaded views and `activeViewId` in module-level state, and constructs `views_list` events for the event bus.
-4. `src/server.ts` exposes `GET /views` and `PUT /views/active` endpoints.
+3. `src/index.ts` stores loaded views in module-level state and constructs `views_list` events for the event bus. If a `defaultViewId` is configured, it is included in the event so the client can apply it.
+4. `src/server.ts` exposes `GET /views` and `PUT /views/default` endpoints.
 5. `src/http.ts` sends the initial `views_list` event when a new SSE client connects.
 6. The web UI (`src/ui.html`) renders views in the sidebar, compiles the filter source string via `new Function`, and applies it client-side to filter the request list.
 
@@ -131,8 +132,12 @@ Views are named filter functions exported from rule files (`rules/*.ts`) that co
 
 ### API endpoints
 
-- `GET /views` — returns `{ views, activeViewId }`
-- `PUT /views/active` — body `{ "viewId": "..." | null }`, returns updated state and broadcasts `views_list` via SSE
+- `GET /views` — returns `{ views, defaultViewId }`
+- `PUT /views/default` — body `{ "viewId": "..." | null }`, persists `defaultViewId` to `~/.aproxy/config.json` and returns updated state
+
+### Default view
+
+The default view is stored in `~/.aproxy/config.json` (managed by `src/config.ts`), not in the view definition. This keeps view definitions and user preferences decoupled. The active view is purely client-side state — the server does not track it. When the UI loads, if no view is active and a default is configured, the default is automatically applied. Users can set the default from the web UI sidebar (select a view, then click "set default") or via the `PUT /views/default` endpoint.
 
 ### Hot-reload
 

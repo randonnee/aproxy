@@ -174,6 +174,22 @@
         margin-left: 14px;
         margin-top: 2px;
       }
+      .view-default-badge {
+        font-size: 10px;
+        color: var(--ink-faint);
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+      .view-set-default {
+        font-size: 10px;
+        color: var(--ink-faint);
+        margin-left: auto;
+        flex-shrink: 0;
+        cursor: pointer;
+      }
+      .view-set-default:hover {
+        color: var(--accent);
+      }
       .sidebar-empty {
         font-size: 12px;
         color: var(--ink-faint);
@@ -742,6 +758,7 @@
       let views = [];         // { id, name, description?, filter (source string) }
       let activeViewId = null;
       let activeViewFn = null; // compiled filter function or null
+      let defaultViewId = null;
 
       // ── DOM refs ──
       const connDot = document.getElementById("connDot");
@@ -984,7 +1001,12 @@
           const res = await fetch("/views");
           const data = await res.json();
           views = data.views || [];
-          activeViewId = data.activeViewId;
+          defaultViewId = data.defaultViewId ?? null;
+          // Apply default view on initial load
+          if (activeViewId === null && defaultViewId !== null) {
+            const exists = views.some(v => v.id === defaultViewId);
+            if (exists) activeViewId = defaultViewId;
+          }
           compileActiveView();
           renderViews();
           renderRequestList();
@@ -1021,13 +1043,45 @@
         const allEl = document.createElement("div");
         allEl.className = "scenario-item" + (activeViewId === null ? " active" : "");
         allEl.innerHTML = '<div class="dot"></div><span>All requests</span>';
+        if (defaultViewId === null && activeViewId === null) {
+          const badge = document.createElement("span");
+          badge.className = "view-default-badge";
+          badge.textContent = "default";
+          allEl.appendChild(badge);
+        } else if (activeViewId === null && defaultViewId !== null) {
+          const setBtn = document.createElement("span");
+          setBtn.className = "view-set-default";
+          setBtn.textContent = "set default";
+          setBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setDefaultView(null);
+          });
+          allEl.appendChild(setBtn);
+        }
         allEl.addEventListener("click", () => setActiveView(null));
         viewList.appendChild(allEl);
 
         views.forEach(v => {
           const el = document.createElement("div");
-          el.className = "scenario-item" + (v.id === activeViewId ? " active" : "");
+          const isActive = v.id === activeViewId;
+          const isDefault = v.id === defaultViewId;
+          el.className = "scenario-item" + (isActive ? " active" : "");
           el.innerHTML = `<div class="dot"></div><span>${esc(v.name || v.id)}</span>`;
+          if (isDefault) {
+            const badge = document.createElement("span");
+            badge.className = "view-default-badge";
+            badge.textContent = "default";
+            el.appendChild(badge);
+          } else if (isActive) {
+            const setBtn = document.createElement("span");
+            setBtn.className = "view-set-default";
+            setBtn.textContent = "set default";
+            setBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              setDefaultView(v.id);
+            });
+            el.appendChild(setBtn);
+          }
           el.addEventListener("click", () => setActiveView(v.id));
           viewList.appendChild(el);
           if (v.description) {
@@ -1039,16 +1093,24 @@
         });
       }
 
-      async function setActiveView(id) {
+      function setActiveView(id) {
+        activeViewId = id;
+        compileActiveView();
+        renderViews();
+        renderRequestList();
+      }
+
+      async function setDefaultView(id) {
         try {
-          const res = await fetch("/views/active", {
+          const res = await fetch("/views/default", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ viewId: id })
           });
           const data = await res.json();
           views = data.views || views;
-          activeViewId = data.activeViewId;
+          activeViewId = data.activeViewId ?? activeViewId;
+          defaultViewId = data.defaultViewId ?? null;
           compileActiveView();
           renderViews();
           renderRequestList();
