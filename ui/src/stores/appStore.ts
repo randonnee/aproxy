@@ -22,7 +22,7 @@ type ViewFilter = (context: {
   mocked?: boolean;
 }) => boolean;
 
-export type DetailTab = "overview" | "req-headers" | "res-headers" | "res-body";
+export type DetailTab = "headers" | "body";
 
 interface AppState {
   // Connection
@@ -33,13 +33,15 @@ interface AppState {
   requests: Map<string, RequestEntry>;
   orderedIds: string[];
   selectedId: string | null;
-  activeTab: DetailTab;
+  reqTab: DetailTab;
+  resTab: DetailTab;
 
   addRequest: (evt: RequestEvent) => void;
   updateResponse: (evt: ResponseEvent) => void;
   updateError: (evt: ErrorEvent) => void;
   selectRequest: (id: string | null) => void;
-  setActiveTab: (tab: DetailTab) => void;
+  setReqTab: (tab: DetailTab) => void;
+  setResTab: (tab: DetailTab) => void;
   clearRequests: () => void;
 
   // Filters
@@ -106,7 +108,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   requests: new Map(),
   orderedIds: [],
   selectedId: null,
-  activeTab: "overview",
+  reqTab: "headers",
+  resTab: "headers",
 
   addRequest: (evt) =>
     set((state) => {
@@ -153,7 +156,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
 
   selectRequest: (id) => set({ selectedId: id }),
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  setReqTab: (tab) => set({ reqTab: tab }),
+  setResTab: (tab) => set({ resTab: tab }),
 
   clearRequests: () =>
     set({

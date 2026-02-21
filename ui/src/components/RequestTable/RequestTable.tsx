@@ -1,19 +1,90 @@
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../../stores/appStore";
 import { parseUrl, formatTime, statusClass } from "../../lib/helpers";
+
+interface Column {
+  key: string;
+  label: string;
+  initWidth: number;
+  minWidth: number;
+  align?: "right" | "center";
+}
+
+const COLUMNS: Column[] = [
+  { key: "method",   label: "Method",  initWidth: 82,  minWidth: 50, align: "center" },
+  { key: "status",   label: "Status",  initWidth: 62,  minWidth: 44, align: "center" },
+  { key: "host",     label: "Host",    initWidth: 200, minWidth: 80 },
+  { key: "path",     label: "Path",    initWidth: -1,  minWidth: 80 },  // -1 = fill remaining
+  { key: "duration", label: "Time",    initWidth: 100, minWidth: 50, align: "right" },
+  { key: "time",     label: "Clock",   initWidth: 100, minWidth: 50, align: "right" },
+];
 
 export function RequestTable() {
   const requests = useAppStore((s) => s.requests);
   const selectedId = useAppStore((s) => s.selectedId);
   const selectRequest = useAppStore((s) => s.selectRequest);
 
-  // Subscribe to filter-affecting state so Zustand re-renders the table
-  // when the active view, search query, or method filter changes.
   const activeViewFn = useAppStore((s) => s.activeViewFn);
   const searchQuery = useAppStore((s) => s.searchQuery);
   const methodFilters = useAppStore((s) => s.methodFilters);
   const orderedIds = useAppStore((s) => s.orderedIds);
 
-  // Compute filtered IDs inline using the subscribed state
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const widthsRef = useRef<number[]>([]);
+  const [colWidths, setColWidths] = useState<number[]>([]);
+
+  // Initialise widths once the container is measured
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || widthsRef.current.length > 0) return;
+
+    const totalWidth = el.clientWidth;
+    const fixedSum = COLUMNS.reduce(
+      (sum, c) => sum + (c.initWidth > 0 ? c.initWidth : 0),
+      0
+    );
+    const initial = COLUMNS.map((c) =>
+      c.initWidth > 0 ? c.initWidth : Math.max(c.minWidth, totalWidth - fixedSum)
+    );
+    widthsRef.current = initial;
+    setColWidths(initial);
+  });
+
+  // Handle resize via refs — no stale closures
+  const onResizeStart = (e: React.MouseEvent, colIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startX = e.clientX;
+    const startWidths = [...widthsRef.current];
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const next = [...startWidths];
+      next[colIndex] = Math.max(COLUMNS[colIndex].minWidth, startWidths[colIndex] + delta);
+      widthsRef.current = next;
+      setColWidths(next);
+    };
+
+    const onUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const gridTemplate =
+    colWidths.length > 0
+      ? colWidths.map((w) => `${w}px`).join(" ")
+      : COLUMNS.map((c) => (c.initWidth > 0 ? `${c.initWidth}px` : "1fr")).join(" ");
+
   const ids = orderedIds.filter((id) => {
     const entry = requests.get(id);
     if (!entry?.request) return false;
@@ -51,84 +122,97 @@ export function RequestTable() {
   });
 
   return (
-    <div className="request-list-wrap">
-      <table className="request-table">
-        <thead>
-          <tr>
-            <th className="col-method">Method</th>
-            <th className="col-status">Status</th>
-            <th className="col-host">Host</th>
-            <th className="col-path">Path</th>
-            <th className="col-duration">Time</th>
-            <th className="col-time">Clock</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ids.map((id) => {
-            const entry = requests.get(id);
-            if (!entry?.request) return null;
+    <div className="request-list-wrap" ref={wrapRef}>
+      {/* Header */}
+      <div className="rtable-header" style={{ gridTemplateColumns: gridTemplate }}>
+        {COLUMNS.map((col, i) => (
+          <div
+            key={col.key}
+            className="rtable-th"
+            style={col.align ? { textAlign: col.align } : undefined}
+          >
+            {col.label}
+            <div
+              className="col-resize-handle"
+              onMouseDown={(e) => onResizeStart(e, i)}
+            />
+          </div>
+        ))}
+      </div>
 
-            const req = entry.request;
-            const res = entry.response;
-            const err = entry.error;
-            const { host, path } = parseUrl(req.url);
-            const status = res
-              ? res.status
-              : err
-                ? "ERR"
-                : "...";
-            const duration = res
-              ? `${res.durationMs}ms`
-              : err
-                ? "err"
-                : "";
-            const time = formatTime(req.timestamp);
-            const mocked = res?.mocked;
+      {/* Body */}
+      <div className="rtable-body">
+        {ids.map((id) => {
+          const entry = requests.get(id);
+          if (!entry?.request) return null;
 
-            const classes = [
-              id === selectedId ? "selected" : "",
-              mocked ? "mocked" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
+          const req = entry.request;
+          const res = entry.response;
+          const err = entry.error;
+          const { host, path } = parseUrl(req.url);
+          const status = res
+            ? res.status
+            : err
+              ? "ERR"
+              : "...";
+          const duration = res
+            ? `${res.durationMs}ms`
+            : err
+              ? "err"
+              : "";
+          const time = formatTime(req.timestamp);
+          const mocked = res?.mocked;
 
-            return (
-              <tr
-                key={id}
-                className={classes}
-                onClick={() => selectRequest(id)}
+          const rowClass = [
+            "rtable-row",
+            id === selectedId ? "selected" : "",
+            mocked ? "mocked" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          const cells: Record<string, React.ReactNode> = {
+            method: <span className={`method method-${req.method}`}>{req.method}</span>,
+            status: (
+              <span
+                className={
+                  typeof status === "number"
+                    ? statusClass(status)
+                    : err
+                      ? "status-5xx"
+                      : "status-pending"
+                }
               >
-                <td className="col-method">
-                  <span className={`method method-${req.method}`}>
-                    {req.method}
-                  </span>
-                </td>
-                <td className="col-status">
-                  <span
-                    className={
-                      typeof status === "number"
-                        ? statusClass(status)
-                        : err
-                          ? "status-5xx"
-                          : "status-pending"
-                    }
-                  >
-                    {status}
-                  </span>
-                </td>
-                <td className="col-host">{host}</td>
-                <td className="col-path">{path}</td>
-                <td className="col-duration" style={{ textAlign: "right" }}>
-                  {duration}
-                </td>
-                <td className="col-time" style={{ textAlign: "right" }}>
-                  {time}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                {status}
+              </span>
+            ),
+            host: host,
+            path: path,
+            duration: duration,
+            time: time,
+          };
+
+          return (
+            <div
+              key={id}
+              className={rowClass}
+              style={{ gridTemplateColumns: gridTemplate }}
+              onClick={() => selectRequest(id)}
+            >
+              {COLUMNS.map((col) => (
+                <div
+                  key={col.key}
+                  className="rtable-td"
+                  style={col.align ? { textAlign: col.align } : undefined}
+                >
+                  {cells[col.key]}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
       {ids.length === 0 && (
         <div className="empty-state">
           <div className="icon">~</div>

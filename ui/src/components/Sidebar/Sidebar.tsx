@@ -8,10 +8,10 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <ProxyToggle />
-      <CaCertificate />
       <ScenarioList />
       <ViewList />
       <SimulatorList />
+      <CaCertificate />
     </div>
   );
 }
