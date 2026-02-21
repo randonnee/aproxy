@@ -110,6 +110,21 @@ export function handleHttpProxy(
 ) {
   const id = crypto.randomUUID();
   const startedAt = Date.now();
+  const controlPort = Number(process.env.PROXY_PORT ?? 8080);
+
+  const isUiRequest = (() => {
+    try {
+      if (req.url.startsWith("http://") || req.url.startsWith("https://")) {
+        const parsed = new URL(req.url);
+        const port = parsed.port ? Number(parsed.port) : 80;
+        if (Number.isNaN(port) || port !== controlPort) return false;
+        return ["localhost", "127.0.0.1"].includes(parsed.hostname);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  })();
 
   const requestEvent: ProxyEvent = {
     type: "request",
@@ -122,6 +137,9 @@ export function handleHttpProxy(
 
   return Effect.gen(function* (_) {
     yield* _(Effect.sync(() => emitEvent(requestEvent)));
+    if (!isUiRequest) {
+      yield* _(Effect.sync(() => console.log(`[proxy] ${req.method} ${req.url}`)));
+    }
     const outcome = yield* _(computeProxyOutcome(req, id, startedAt, applyRules));
     if (outcome.event) {
       const event = outcome.event;

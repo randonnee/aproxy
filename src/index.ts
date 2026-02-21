@@ -4,7 +4,13 @@ import type { LoadedScenario } from "./rules";
 import { EventBus } from "./eventBus";
 import { ProxyError } from "./errors";
 import { createRoutes, createServer, createSse } from "./server";
-import { configureSimulatorProxy, installSimulatorCertificate, listSimulators } from "./simulators";
+import {
+  configureHostProxy,
+  disableHostProxy,
+  readHostProxySettings,
+  installSimulatorCertificate,
+  listSimulators
+} from "./simulators";
 import { loadScenarios, watchRules } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
 import { type RuleHandler } from "./rules";
@@ -63,24 +69,22 @@ const main = Effect.gen(function* (_) {
     getActiveScenarioId: () => activeScenarioId,
     setActiveScenarioId,
     getScenarios: () => loadedScenarios.map(({ id, name, description }) => ({ id, name, description })),
+    enableProxy: (input: { proxyHost: string; proxyPort: number }) =>
+      Effect.tryPromise(() => configureHostProxy(input)).pipe(
+        Effect.mapError((cause) => new ProxyError({ cause }))
+      ),
+    disableProxy: () =>
+      Effect.tryPromise(() => disableHostProxy()).pipe(
+        Effect.mapError((cause) => new ProxyError({ cause }))
+      ),
+    proxyStatus: () =>
+      Effect.tryPromise(() => readHostProxySettings()).pipe(
+        Effect.mapError((cause) => new ProxyError({ cause }))
+      ),
     listSimulators: () =>
       Effect.tryPromise(() => listSimulators()).pipe(
         Effect.tap((simulators) =>
           Effect.sync(() => eventBus.emit({ type: "simulators_list", simulators }))
-        ),
-        Effect.mapError((cause) => new ProxyError({ cause }))
-      ),
-    configureSimulator: (input: { udid: string; proxyHost: string; proxyPort: number }) =>
-      Effect.tryPromise(() => configureSimulatorProxy(input)).pipe(
-        Effect.tap((simulator) =>
-          Effect.sync(() =>
-            eventBus.emit({
-              type: "simulator_configured",
-              simulator,
-              proxyHost: input.proxyHost,
-              proxyPort: input.proxyPort
-            })
-          )
         ),
         Effect.mapError((cause) => new ProxyError({ cause }))
       ),
@@ -101,7 +105,7 @@ const main = Effect.gen(function* (_) {
       )
   });
 
-  yield* _(createServer(routes));
+  yield* _(createServer(routes, (event) => eventBus.emit(event)));
   yield* _(loadRulesEffect);
   yield* _(
     watchRules(rulesDirUrl, () => {

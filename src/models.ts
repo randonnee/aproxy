@@ -59,7 +59,16 @@ export type SimulatorErrorEvent = {
   timestamp: number;
 };
 
+export type SimulatorProxyStatusEvent = {
+  type: "simulator_proxy_status";
+  simulator: SimulatorInfo;
+  settings: Record<string, string>;
+  raw: string;
+  networkService?: string;
+};
+
 export type SimulatorEvent =
   | SimulatorsListEvent
   | SimulatorConfigEvent
+  | SimulatorProxyStatusEvent
   | SimulatorErrorEvent;

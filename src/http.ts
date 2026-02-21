@@ -30,20 +30,19 @@ export function createSseStream(
   listRulesEvent: () => RulesListEvent
 ) {
   const sseClients = new Set<ReadableStreamDefaultController<string>>();
-  eventBus.on((event) => emitSse(event, sseClients));
+  const unsubscribe = eventBus.on((event) => emitSse(event, sseClients));
 
   return new ReadableStream<string>({
     start(controller) {
       sseClients.add(controller);
-      controller.enqueue("event: hello\n");
-      controller.enqueue("data: {\"status\":\"ok\"}\n\n");
-      controller.enqueue(`event: rules_list\n`);
+      controller.enqueue("data: {\"type\":\"hello\",\"status\":\"ok\"}\n\n");
       controller.enqueue(`data: ${JSON.stringify(listRulesEvent())}\n\n`);
 
       abortSignal.addEventListener(
         "abort",
         () => {
           sseClients.delete(controller);
+          unsubscribe();
           controller.close();
         },
         { once: true }
@@ -53,7 +52,7 @@ export function createSseStream(
 }
 
 function emitSse(event: { type: string }, sseClients: Set<ReadableStreamDefaultController<string>>) {
-  const payload = `event: ${event.type}\n` + `data: ${JSON.stringify(event)}\n\n`;
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
   for (const controller of sseClients) controller.enqueue(payload);
 }
 

@@ -40,6 +40,44 @@ async function runCommand(command: string, args: string[]) {
   return stdout.trim();
 }
 
+async function runCommandOptional(command: string, args: string[]) {
+  try {
+    await runCommand(command, args);
+  } catch {
+    // ignore optional command failures
+  }
+}
+
+async function runCommandOptionalText(command: string, args: string[]) {
+  try {
+    return await runCommand(command, args);
+  } catch {
+    return "";
+  }
+}
+
+async function getActiveNetworkService() {
+  // Find the primary network service by checking which one has a default route
+  const routeOutput = await runCommand("route", ["-n", "get", "default"]);
+  const ifaceMatch = routeOutput.match(/interface:\s*(\S+)/);
+  if (!ifaceMatch) throw new ProxyError({ cause: new Error("No default network interface found") });
+
+  const iface = ifaceMatch[1];
+
+  // Map the BSD interface name to a networksetup service name
+  const servicesOutput = await runCommand("networksetup", ["-listallhardwareports"]);
+  const blocks = servicesOutput.split(/\n\n/);
+  for (const block of blocks) {
+    const deviceMatch = block.match(/Device:\s*(\S+)/);
+    const nameMatch = block.match(/Hardware Port:\s*(.+)/);
+    if (deviceMatch && nameMatch && deviceMatch[1] === iface) {
+      return nameMatch[1].trim();
+    }
+  }
+
+  throw new ProxyError({ cause: new Error(`No network service found for interface ${iface}`) });
+}
+
 function isAvailableDevice(device: SimctlDevice) {
   if (typeof device.isAvailable === "boolean") return device.isAvailable;
   if (typeof device.availability === "string") return device.availability.includes("available");
@@ -76,82 +114,56 @@ export async function ensureBootedSimulator(udid: string) {
   return simulator;
 }
 
-export async function configureSimulatorProxy(input: {
-  udid: string;
+export async function configureHostProxy(input: {
   proxyHost: string;
   proxyPort: number;
 }) {
-  const simulator = await ensureBootedSimulator(input.udid);
-
   const host = input.proxyHost;
   const port = String(input.proxyPort);
 
-  await runCommand("xcrun", [
-    "simctl",
-    "spawn",
-    input.udid,
-    "defaults",
-    "write",
-    "com.apple.CFNetwork",
-    "HTTPEnable",
-    "-bool",
-    "true"
-  ]);
-  await runCommand("xcrun", [
-    "simctl",
-    "spawn",
-    input.udid,
-    "defaults",
-    "write",
-    "com.apple.CFNetwork",
-    "HTTPProxy",
-    host
-  ]);
-  await runCommand("xcrun", [
-    "simctl",
-    "spawn",
-    input.udid,
-    "defaults",
-    "write",
-    "com.apple.CFNetwork",
-    "HTTPPort",
-    "-int",
-    port
-  ]);
-  await runCommand("xcrun", [
-    "simctl",
-    "spawn",
-    input.udid,
-    "defaults",
-    "write",
-    "com.apple.CFNetwork",
-    "HTTPSEnable",
-    "-bool",
-    "true"
-  ]);
-  await runCommand("xcrun", [
-    "simctl",
-    "spawn",
-    input.udid,
-    "defaults",
-    "write",
-    "com.apple.CFNetwork",
-    "HTTPSProxy",
-    host
-  ]);
-  await runCommand("xcrun", [
-    "simctl",
-    "spawn",
-    input.udid,
-    "defaults",
-    "write",
-    "com.apple.CFNetwork",
-    "HTTPSPort",
-    "-int",
-    port
-  ]);
+  // iOS simulators share the host's network stack, so proxy settings must be
+  // applied to the host's active network service via networksetup.
+  const service = await getActiveNetworkService();
 
-  return simulator;
+  await runCommand("networksetup", ["-setwebproxy", service, host, port]);
+  await runCommand("networksetup", ["-setsecurewebproxy", service, host, port]);
+  await runCommand("networksetup", ["-setwebproxystate", service, "on"]);
+  await runCommand("networksetup", ["-setsecurewebproxystate", service, "on"]);
+
+  return { networkService: service, proxyHost: host, proxyPort: input.proxyPort, enabled: true };
+}
+
+export async function readHostProxySettings() {
+  const service = await getActiveNetworkService();
+  const httpOutput = await runCommandOptionalText("networksetup", ["-getwebproxy", service]);
+  const httpsOutput = await runCommandOptionalText("networksetup", ["-getsecurewebproxy", service]);
+
+  const settings: Record<string, string> = {};
+  const parseNetworkSetup = (output: string, prefix: string) => {
+    for (const line of output.split("\n")) {
+      const match = line.match(/^(\w[\w\s]*):\s*(.+)$/);
+      if (match) {
+        const key = prefix + match[1].trim().replace(/\s+/g, "");
+        settings[key] = match[2].trim();
+      }
+    }
+  };
+  parseNetworkSetup(httpOutput, "HTTP");
+  parseNetworkSetup(httpsOutput, "HTTPS");
+
+  const raw = `--- HTTP Proxy (${service}) ---\n${httpOutput}\n--- HTTPS Proxy (${service}) ---\n${httpsOutput}`;
+  const enabled = settings["HTTPEnabled"] === "Yes";
+
+  return { settings, raw, networkService: service, enabled };
+}
+
+export async function disableHostProxy() {
+  const service = await getActiveNetworkService();
+
+  await runCommand("networksetup", ["-setwebproxystate", service, "off"]);
+  await runCommand("networksetup", ["-setsecurewebproxystate", service, "off"]);
+
+  return { networkService: service, enabled: false };
 }
 
 export async function installSimulatorCertificate(input: { udid: string; certPath: string }) {

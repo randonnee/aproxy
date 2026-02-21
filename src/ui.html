@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aproxy Control</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+      :root {
+        --bg: #0c1114;
+        --bg-alt: #121a1f;
+        --panel: #111920;
+        --panel-strong: #18232b;
+        --ink: #e5f1f2;
+        --ink-muted: #9bb0b8;
+        --accent: #47d7ac;
+        --accent-strong: #2bc7ff;
+        --warn: #ffb84f;
+        --error: #ff6b6b;
+        --shadow: rgba(7, 12, 16, 0.4);
+        --radius-lg: 18px;
+        --radius-md: 12px;
+        --radius-sm: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+        color: var(--ink);
+        min-height: 100vh;
+        background: radial-gradient(circle at top, rgba(71, 215, 172, 0.12), transparent 45%),
+          radial-gradient(circle at 20% 20%, rgba(43, 199, 255, 0.15), transparent 42%),
+          linear-gradient(140deg, #0b1013 10%, #131c22 60%, #0c1216 100%);
+      }
+
+      .page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 24px 48px;
+        display: grid;
+        gap: 24px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      .brand {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .brand h1 {
+        font-family: "Fraunces", serif;
+        font-size: 34px;
+        letter-spacing: 0.5px;
+      }
+
+      .brand p {
+        color: var(--ink-muted);
+        font-size: 15px;
+      }
+
+      .status-pill {
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(71, 215, 172, 0.12);
+        color: var(--accent);
+        font-weight: 600;
+        letter-spacing: 0.2px;
+        border: 1px solid rgba(71, 215, 172, 0.3);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .status-pill span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 10px rgba(71, 215, 172, 0.6);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+      }
+
+      .card {
+        background: var(--panel);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        box-shadow: 0 14px 30px var(--shadow);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(130deg, rgba(71, 215, 172, 0.06), transparent 55%);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+      }
+
+      .card:hover::after {
+        opacity: 1;
+      }
+
+      .card h2 {
+        font-size: 18px;
+        margin-bottom: 14px;
+        letter-spacing: 0.3px;
+      }
+
+      .card h3 {
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 1.4px;
+        color: var(--ink-muted);
+        margin-bottom: 12px;
+      }
+
+      .input-row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      label {
+        font-size: 13px;
+        color: var(--ink-muted);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1 1 140px;
+      }
+
+      input, select {
+        background: var(--bg-alt);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--ink);
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 14px;
+      }
+
+      input::placeholder {
+        color: rgba(155, 176, 184, 0.7);
+      }
+
+      .button-row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+
+      button {
+        background: linear-gradient(120deg, rgba(71, 215, 172, 0.9), rgba(43, 199, 255, 0.8));
+        color: #0c1114;
+        border: none;
+        padding: 10px 16px;
+        border-radius: var(--radius-sm);
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(43, 199, 255, 0.2);
+      }
+
+      .mono {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+      }
+
+      .events {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 480px;
+        overflow: auto;
+        padding-right: 6px;
+      }
+
+      .event {
+        padding: 12px;
+        border-radius: var(--radius-md);
+        background: var(--panel-strong);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        display: grid;
+        gap: 6px;
+        animation: fadeUp 0.3s ease;
+      }
+
+      .event .type {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+      }
+
+      .event.request .type {
+        color: var(--accent);
+      }
+
+      .event.response .type {
+        color: var(--accent-strong);
+      }
+
+      .event.error .type,
+      .event.simulator_error .type {
+        color: var(--error);
+      }
+
+      .event.rules_list .type,
+      .event.simulators_list .type,
+      .event.simulator_configured .type {
+        color: var(--warn);
+      }
+
+      .event.simulator_warning .type {
+        color: var(--warn);
+      }
+
+      .event .meta {
+        color: var(--ink-muted);
+        font-size: 12px;
+      }
+
+      .event .payload {
+        font-size: 12px;
+        line-height: 1.5;
+        color: #d0e3e8;
+      }
+
+      .sim-list {
+        display: grid;
+        gap: 10px;
+        max-height: 240px;
+        overflow: auto;
+        padding-right: 6px;
+      }
+
+      .sim-item {
+        display: grid;
+        gap: 6px;
+        padding: 10px;
+        border-radius: var(--radius-md);
+        background: rgba(12, 17, 20, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        cursor: pointer;
+        transition: border 0.2s ease, transform 0.2s ease;
+      }
+
+      .sim-item:hover {
+        border-color: rgba(71, 215, 172, 0.5);
+        transform: translateY(-1px);
+      }
+
+      .sim-item.active {
+        border-color: rgba(43, 199, 255, 0.6);
+        background: rgba(16, 26, 32, 0.9);
+      }
+
+      .sim-item .title {
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .badge {
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink-muted);
+      }
+
+      .badge.booted {
+        background: rgba(71, 215, 172, 0.18);
+        color: var(--accent);
+      }
+
+      .hint {
+        font-size: 12px;
+        color: var(--ink-muted);
+        margin-top: 6px;
+      }
+
+      .logs {
+        font-size: 12px;
+        color: var(--ink-muted);
+        min-height: 16px;
+        margin-top: 10px;
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 720px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .events {
+          max-height: 360px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <div class="brand">
+          <h1>Aproxy Control</h1>
+          <p>Live event stream + simulator proxy management</p>
+        </div>
+        <div class="status-pill" id="statusPill"><span></span> Connected</div>
+      </header>
+
+      <section class="grid">
+        <div class="card">
+          <h2>System Proxy</h2>
+          <div class="input-row">
+            <label>
+              Proxy Host
+              <input id="proxyHost" placeholder="Auto" />
+            </label>
+            <label>
+              Proxy Port
+              <input id="proxyPort" type="number" placeholder="8080" value="8080" />
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="enableProxy">Enable Proxy</button>
+            <button class="secondary" id="disableProxy">Disable Proxy</button>
+            <button class="secondary" id="checkProxy">Check Status</button>
+          </div>
+          <div class="hint" id="proxyStatusHint">Applies to all traffic on this machine (including simulators).</div>
+        </div>
+
+        <div class="card">
+          <h2>Simulator Fleet</h2>
+          <div class="button-row">
+            <button class="secondary" id="refreshSimulators">Refresh simulators</button>
+          </div>
+          <div class="sim-list" id="simList"></div>
+          <div class="hint">Select a booted simulator to install certs.</div>
+        </div>
+
+        <div class="card">
+          <h2>Certificate Install</h2>
+          <div class="input-row">
+            <label>
+              Selected Simulator
+              <input id="selectedSimulatorCert" placeholder="Pick a simulator" disabled />
+            </label>
+            <label>
+              Cert Path
+              <input id="certPath" placeholder="/absolute/path/to/ca.pem" />
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="installCert">Install Certificate</button>
+          </div>
+          <div class="hint">Requires a booted simulator and a valid absolute file path.</div>
+        </div>
+
+        <div class="card">
+          <h2>Event Stream</h2>
+          <div class="input-row">
+            <label>
+              Filter Types
+              <select id="eventFilter">
+                <option value="all">All events</option>
+                <option value="request">request</option>
+                <option value="response">response</option>
+                <option value="error">error</option>
+                <option value="rules_list">rules_list</option>
+                <option value="simulators_list">simulators_list</option>
+                <option value="simulator_configured">simulator_configured</option>
+                <option value="simulator_error">simulator_error</option>
+              </select>
+            </label>
+            <label>
+              Search
+              <input id="eventSearch" placeholder="/api/users or status 500" />
+            </label>
+          </div>
+          <div class="button-row">
+            <button class="secondary" id="clearEvents">Clear events</button>
+          </div>
+          <div class="events" id="eventList"></div>
+          <div class="logs" id="eventLog"></div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const eventList = document.getElementById("eventList");
+      const eventFilter = document.getElementById("eventFilter");
+      const eventSearch = document.getElementById("eventSearch");
+      const eventLog = document.getElementById("eventLog");
+      const statusPill = document.getElementById("statusPill");
+      const proxyStatusHint = document.getElementById("proxyStatusHint");
+      const simList = document.getElementById("simList");
+      const refreshSimulators = document.getElementById("refreshSimulators");
+      const selectedSimulatorCert = document.getElementById("selectedSimulatorCert");
+      const proxyHost = document.getElementById("proxyHost");
+      const proxyPort = document.getElementById("proxyPort");
+      const enableProxy = document.getElementById("enableProxy");
+      const disableProxy = document.getElementById("disableProxy");
+      const checkProxy = document.getElementById("checkProxy");
+      const certPath = document.getElementById("certPath");
+      const installCert = document.getElementById("installCert");
+
+      const maxEvents = 200;
+      let events = [];
+      let simulators = [];
+      let selectedUdid = "";
+
+      const formatTime = (ts) => new Date(ts).toLocaleTimeString();
+
+      const setStatus = (connected) => {
+        statusPill.innerHTML = connected
+          ? "<span></span> Connected"
+          : "<span style=\"background:#ff6b6b;box-shadow:0 0 10px rgba(255,107,107,0.6)\"></span> Disconnected";
+      };
+
+      const updateSimulatorList = () => {
+        simList.innerHTML = "";
+        if (!simulators.length) {
+          simList.innerHTML = "<div class=\"hint\">No simulators found.</div>";
+          return;
+        }
+        simulators.forEach((sim) => {
+          const item = document.createElement("div");
+          item.className = "sim-item" + (sim.udid === selectedUdid ? " active" : "");
+          item.innerHTML = `
+            <div class="title">
+              <span>${sim.name}</span>
+              <span class="badge ${sim.isBooted ? "booted" : ""}">${sim.state}</span>
+            </div>
+            <div class="mono">${sim.runtime}</div>
+            <div class="mono">${sim.udid}</div>
+          `;
+          item.addEventListener("click", () => {
+            selectedUdid = sim.udid;
+            selectedSimulatorCert.value = `${sim.name} (${sim.state})`;
+            updateSimulatorList();
+          });
+          simList.appendChild(item);
+        });
+      };
+
+      const renderEvents = () => {
+        const filterType = eventFilter.value;
+        const search = eventSearch.value.trim().toLowerCase();
+        eventList.innerHTML = "";
+
+        const filtered = events.filter((evt) => {
+          if (filterType !== "all" && evt.type !== filterType) return false;
+          if (!search) return true;
+          return JSON.stringify(evt).toLowerCase().includes(search);
+        });
+
+        filtered.slice(0, maxEvents).forEach((evt) => {
+          const card = document.createElement("div");
+          card.className = `event ${evt.type}`;
+          const time = evt.timestamp ? formatTime(evt.timestamp) : "";
+          let detail = "";
+          if (evt.type === "request") detail = `${evt.method} ${evt.url}`;
+          if (evt.type === "response") detail = `Status ${evt.status} in ${evt.durationMs}ms`;
+          if (evt.type === "error" || evt.type === "simulator_error") detail = evt.message;
+          if (evt.type === "simulator_configured") {
+            if (evt.certPath) {
+              detail = `Installed cert ${evt.certPath} on ${evt.simulator?.name ?? "simulator"}`;
+            } else {
+              detail = `Configured ${evt.simulator?.name ?? "simulator"} ${evt.proxyHost}:${evt.proxyPort}`;
+            }
+          }
+          if (evt.type === "simulators_list") detail = `Simulators: ${evt.simulators?.length ?? 0}`;
+          if (evt.type === "rules_list") detail = `Rules: ${evt.rules?.length ?? 0}`;
+          card.innerHTML = `
+            <div class="type">${evt.type}</div>
+            <div class="meta">${time}</div>
+            <div class="payload mono">${detail}</div>
+          `;
+          eventList.appendChild(card);
+        });
+        eventLog.textContent = `${filtered.length} events shown`;
+      };
+
+      const addEvent = (evt) => {
+        events.unshift(evt);
+        if (events.length > maxEvents) events = events.slice(0, maxEvents);
+        renderEvents();
+      };
+
+      const fetchSimulators = async () => {
+        try {
+          const res = await fetch("/simulators");
+          const payload = await res.json();
+          simulators = payload.simulators ?? [];
+          updateSimulatorList();
+        } catch (err) {
+          addEvent({
+            type: "simulator_error",
+            message: "Failed to load simulators",
+            timestamp: Date.now()
+          });
+        }
+      };
+
+      refreshSimulators.addEventListener("click", fetchSimulators);
+
+      const ensureProxyHost = async () => {
+        if (proxyHost.value.trim()) return proxyHost.value.trim();
+        try {
+          const res = await fetch("/host");
+          const payload = await res.json();
+          if (payload.host) {
+            proxyHost.value = payload.host;
+            return payload.host;
+          }
+        } catch (err) {
+          // ignore
+        }
+        return "127.0.0.1";
+      };
+
+      const updateProxyStatusHint = (enabled) => {
+        proxyStatusHint.textContent = enabled
+          ? "System proxy is ON. All traffic on this machine routes through the proxy."
+          : "System proxy is OFF.";
+        proxyStatusHint.style.color = enabled ? "var(--accent)" : "var(--ink-muted)";
+      };
+
+      enableProxy.addEventListener("click", async () => {
+        try {
+          const host = await ensureProxyHost();
+          const res = await fetch("/proxy/enable", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              proxyHost: host,
+              proxyPort: Number(proxyPort.value)
+            })
+          });
+          const payload = await res.json();
+          updateProxyStatusHint(payload.enabled);
+          addEvent({
+            type: "simulator_configured",
+            simulator: { name: payload.networkService },
+            proxyHost: payload.proxyHost,
+            proxyPort: payload.proxyPort,
+            timestamp: Date.now()
+          });
+        } catch (err) {
+          addEvent({ type: "simulator_error", message: "Failed to enable proxy", timestamp: Date.now() });
+        }
+      });
+
+      disableProxy.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/proxy/disable", { method: "POST" });
+          const payload = await res.json();
+          updateProxyStatusHint(payload.enabled);
+          addEvent({
+            type: "simulator_configured",
+            simulator: { name: payload.networkService },
+            proxyHost: "disabled",
+            proxyPort: 0,
+            timestamp: Date.now()
+          });
+        } catch (err) {
+          addEvent({ type: "simulator_error", message: "Failed to disable proxy", timestamp: Date.now() });
+        }
+      });
+
+      checkProxy.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/proxy/status");
+          const payload = await res.json();
+          updateProxyStatusHint(payload.enabled);
+          addEvent({
+            type: "simulator_configured",
+            simulator: { name: payload.networkService },
+            proxyHost: payload.enabled ? (payload.settings?.HTTPServer ?? "unknown") : "disabled",
+            proxyPort: payload.enabled ? Number(payload.settings?.HTTPPort ?? 0) : 0,
+            timestamp: Date.now()
+          });
+        } catch (err) {
+          addEvent({ type: "simulator_error", message: "Failed to check proxy status", timestamp: Date.now() });
+        }
+      });
+
+      installCert.addEventListener("click", async () => {
+        if (!selectedUdid) return addEvent({ type: "simulator_error", message: "Pick a simulator", timestamp: Date.now() });
+        if (!certPath.value) {
+          return addEvent({ type: "simulator_error", message: "Cert path is required", timestamp: Date.now() });
+        }
+        try {
+          const res = await fetch("/simulators/certs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ udid: selectedUdid, certPath: certPath.value })
+          });
+          const payload = await res.json();
+          addEvent({
+            type: "simulator_configured",
+            simulator: payload.simulator,
+            proxyHost: "",
+            proxyPort: 0,
+            certPath: payload.certPath,
+            timestamp: Date.now()
+          });
+        } catch (err) {
+          addEvent({ type: "simulator_error", message: "Cert install failed", timestamp: Date.now() });
+        }
+      });
+
+      document.getElementById("clearEvents").addEventListener("click", () => {
+        events = [];
+        renderEvents();
+      });
+
+      eventFilter.addEventListener("change", renderEvents);
+      eventSearch.addEventListener("input", renderEvents);
+
+      const startEvents = () => {
+        const source = new EventSource("/events");
+        setStatus(true);
+        source.onmessage = (msg) => {
+          try {
+            const evt = JSON.parse(msg.data);
+            if (evt.type === "simulators_list") {
+              simulators = evt.simulators ?? simulators;
+              updateSimulatorList();
+            }
+            addEvent(evt);
+          } catch (err) {
+            addEvent({ type: "error", message: "Malformed event payload", timestamp: Date.now() });
+          }
+        };
+        source.onerror = () => {
+          setStatus(false);
+        };
+      };
+
+      // Auto-populate proxy host and check initial proxy status on load
+      ensureProxyHost();
+      fetch("/proxy/status").then(r => r.json()).then(p => updateProxyStatusHint(p.enabled)).catch(() => {});
+      fetchSimulators();
+      startEvents();
+    </script>
+  </body>
+</html>
