@@ -34,10 +34,4 @@ export const views: ViewFactory[] = [
     description: "Show only requests with 4xx/5xx status codes",
     filter: (ctx) => (ctx.status ?? 0) >= 400,
   }),
-  () => ({
-    id: "api-calls",
-    name: "API Calls",
-    description: "Show only requests containing /api/ in the URL",
-    filter: (ctx) => /\/api\//.test(ctx.url),
-  }),
 ];

@@ -3,7 +3,7 @@ import type { CaCert } from "./ca";
 import type { AproxyConfig } from "./config";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
@@ -11,12 +11,8 @@ import { createTcpProxy } from "./tcpProxy";
 
 // Resolve UI dist directory (built React app)
 const uiDistDir = join(import.meta.dir, "..", "ui", "dist");
-const uiAvailable = existsSync(join(uiDistDir, "index.html"));
-
-// Fallback: load legacy single-file UI if the React build isn't available
-const uiHtml = uiAvailable
-  ? await Bun.file(join(uiDistDir, "index.html")).text()
-  : await Bun.file(new URL("./ui.html", import.meta.url)).text();
+const uiIndexPath = join(uiDistDir, "index.html");
+const uiFallbackPath = new URL("./ui.html", import.meta.url);
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -145,7 +141,10 @@ export function createRoutes(
       }
 
       if (isControlRequest && url?.pathname === "/" && req.method === "GET") {
-        return new Response(uiHtml, {
+        const html = existsSync(uiIndexPath)
+          ? readFileSync(uiIndexPath, "utf-8")
+          : readFileSync(uiFallbackPath, "utf-8");
+        return new Response(html, {
           headers: {
             "Content-Type": "text/html; charset=utf-8"
           }
@@ -183,6 +182,22 @@ export function createRoutes(
       if (isControlRequest && url?.pathname === "/rules/reload" && req.method === "POST") {
         yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
         return Response.json(deps.listRulesEvent());
+      }
+
+      // --- Config / Theme ---
+      if (isControlRequest && url?.pathname === "/config/theme" && req.method === "GET") {
+        return Response.json({ theme: deps.getConfig().theme ?? "dark" });
+      }
+
+      if (isControlRequest && url?.pathname === "/config/theme" && req.method === "PUT") {
+        const body = yield* _(
+          parseJsonBody<{ theme: "light" | "dark" }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const theme = body.theme === "light" ? "light" : "dark";
+        deps.updateConfig({ theme });
+        return Response.json({ theme: deps.getConfig().theme });
       }
 
       // --- Views (custom filters) ---
@@ -308,7 +323,7 @@ export function createRoutes(
       }
 
       // Serve static assets from the React UI build (js, css, etc.)
-      if (isControlRequest && uiAvailable && url?.pathname && req.method === "GET") {
+      if (isControlRequest && url?.pathname && req.method === "GET") {
         const safePath = url.pathname.replace(/\.\./g, "");
         const filePath = join(uiDistDir, safePath);
         if (existsSync(filePath)) {

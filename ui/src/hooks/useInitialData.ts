@@ -8,6 +8,7 @@ export function useInitialData() {
   const setScenarios = useAppStore((s) => s.setScenarios);
   const setViews = useAppStore((s) => s.setViews);
   const setSimulators = useAppStore((s) => s.setSimulators);
+  const setTheme = useAppStore((s) => s.setTheme);
 
   useEffect(() => {
     api
@@ -30,5 +31,9 @@ export function useInitialData() {
       .getSimulators()
       .then((d) => setSimulators(d.simulators))
       .catch(() => {});
-  }, [setProxyEnabled, setCaTrusted, setScenarios, setViews, setSimulators]);
+    api
+      .getTheme()
+      .then((d) => setTheme(d.theme))
+      .catch(() => {});
+  }, [setProxyEnabled, setCaTrusted, setScenarios, setViews, setSimulators, setTheme]);
 }

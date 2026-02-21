@@ -44,9 +44,9 @@ interface AppState {
 
   // Filters
   searchQuery: string;
-  methodFilter: string;
+  methodFilters: Set<string>;
   setSearchQuery: (q: string) => void;
-  setMethodFilter: (m: string) => void;
+  toggleMethodFilter: (method: string) => void;
 
   // Proxy
   proxyEnabled: boolean;
@@ -77,6 +77,10 @@ interface AppState {
   // Detail panel resize
   detailHeight: number;
   setDetailHeight: (h: number) => void;
+
+  // Theme
+  theme: "light" | "dark";
+  setTheme: (theme: "light" | "dark") => void;
 
   // Computed
   getFilteredIds: () => string[];
@@ -160,9 +164,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Filters
   searchQuery: "",
-  methodFilter: "all",
+  methodFilters: new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]),
   setSearchQuery: (q) => set({ searchQuery: q }),
-  setMethodFilter: (m) => set({ methodFilter: m }),
+  toggleMethodFilter: (method) =>
+    set((state) => {
+      const next = new Set(state.methodFilters);
+      if (next.has(method)) {
+        next.delete(method);
+      } else {
+        next.add(method);
+      }
+      return { methodFilters: next };
+    }),
 
   // Proxy
   proxyEnabled: false,
@@ -216,18 +229,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   detailHeight: 320,
   setDetailHeight: (h) => set({ detailHeight: h }),
 
+  // Theme
+  theme: "dark",
+  setTheme: (theme) => {
+    document.documentElement.setAttribute("data-theme", theme);
+    set({ theme });
+  },
+
   // Computed
   getFilteredIds: () => {
     const state = get();
     const search = state.searchQuery.trim().toLowerCase();
-    const method = state.methodFilter;
+    const methods = state.methodFilters;
     const viewFn = state.activeViewFn;
 
     return state.orderedIds.filter((id) => {
       const entry = state.requests.get(id);
       if (!entry?.request) return false;
 
-      if (method !== "all" && entry.request.method !== method) return false;
+      if (methods.size > 0 && !methods.has(entry.request.method)) return false;
 
       if (search) {
         const haystack =

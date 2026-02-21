@@ -7,10 +7,12 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 export type AproxyConfig = {
   defaultViewId: string | null;
+  theme: "light" | "dark";
 };
 
 const defaults: AproxyConfig = {
   defaultViewId: null,
+  theme: "dark",
 };
 
 export function loadConfig(): AproxyConfig {

@@ -106,3 +106,17 @@ export async function getCaTrustStatus(): Promise<{ trusted: boolean }> {
 export async function trustCaOnHost(): Promise<{ trusted: boolean }> {
   return fetchJson("/ca/trust", { method: "POST" });
 }
+
+export async function getTheme(): Promise<{ theme: "light" | "dark" }> {
+  return fetchJson("/config/theme");
+}
+
+export async function setTheme(
+  theme: "light" | "dark"
+): Promise<{ theme: "light" | "dark" }> {
+  return fetchJson("/config/theme", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme }),
+  });
+}

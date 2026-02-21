@@ -2,12 +2,53 @@ import { useAppStore } from "../../stores/appStore";
 import { parseUrl, formatTime, statusClass } from "../../lib/helpers";
 
 export function RequestTable() {
-  const getFilteredIds = useAppStore((s) => s.getFilteredIds);
   const requests = useAppStore((s) => s.requests);
   const selectedId = useAppStore((s) => s.selectedId);
   const selectRequest = useAppStore((s) => s.selectRequest);
 
-  const ids = getFilteredIds();
+  // Subscribe to filter-affecting state so Zustand re-renders the table
+  // when the active view, search query, or method filter changes.
+  const activeViewFn = useAppStore((s) => s.activeViewFn);
+  const searchQuery = useAppStore((s) => s.searchQuery);
+  const methodFilters = useAppStore((s) => s.methodFilters);
+  const orderedIds = useAppStore((s) => s.orderedIds);
+
+  // Compute filtered IDs inline using the subscribed state
+  const ids = orderedIds.filter((id) => {
+    const entry = requests.get(id);
+    if (!entry?.request) return false;
+
+    if (methodFilters.size > 0 && !methodFilters.has(entry.request.method)) return false;
+
+    if (searchQuery) {
+      const search = searchQuery.trim().toLowerCase();
+      if (search) {
+        const haystack =
+          `${entry.request.method} ${entry.request.url} ${entry.response?.status || ""}`.toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+    }
+
+    if (activeViewFn) {
+      try {
+        const ctx = {
+          id: entry.request.id,
+          url: entry.request.url,
+          method: entry.request.method,
+          headers: entry.request.headers || {},
+          status: entry.response?.status,
+          responseHeaders: entry.response?.headers,
+          durationMs: entry.response?.durationMs,
+          mocked: entry.response?.mocked,
+        };
+        if (!activeViewFn(ctx)) return false;
+      } catch {
+        // If filter throws, include the request
+      }
+    }
+
+    return true;
+  });
 
   return (
     <div className="request-list-wrap">

@@ -1,10 +1,12 @@
 import { useAppStore } from "../stores/appStore";
 
+const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "CONNECT"] as const;
+
 export function Toolbar() {
   const searchQuery = useAppStore((s) => s.searchQuery);
-  const methodFilter = useAppStore((s) => s.methodFilter);
+  const methodFilters = useAppStore((s) => s.methodFilters);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
-  const setMethodFilter = useAppStore((s) => s.setMethodFilter);
+  const toggleMethodFilter = useAppStore((s) => s.toggleMethodFilter);
 
   return (
     <div className="toolbar">
@@ -14,18 +16,18 @@ export function Toolbar() {
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
       />
-      <select
-        value={methodFilter}
-        onChange={(e) => setMethodFilter(e.target.value)}
-      >
-        <option value="all">All Methods</option>
-        <option value="GET">GET</option>
-        <option value="POST">POST</option>
-        <option value="PUT">PUT</option>
-        <option value="DELETE">DELETE</option>
-        <option value="PATCH">PATCH</option>
-        <option value="CONNECT">CONNECT</option>
-      </select>
+      <div className="method-filters">
+        {METHODS.map((m) => (
+          <label key={m} className={`method-chip ${methodFilters.has(m) ? "active" : ""}`}>
+            <input
+              type="checkbox"
+              checked={methodFilters.has(m)}
+              onChange={() => toggleMethodFilter(m)}
+            />
+            <span className={`method-label method-${m}`}>{m}</span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

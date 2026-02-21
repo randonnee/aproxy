@@ -1,10 +1,13 @@
 import { useAppStore } from "../stores/appStore";
+import * as api from "../lib/api";
 
 export function TopBar() {
   const connected = useAppStore((s) => s.connected);
   const proxyEnabled = useAppStore((s) => s.proxyEnabled);
   const orderedIds = useAppStore((s) => s.orderedIds);
   const clearRequests = useAppStore((s) => s.clearRequests);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
 
   const dotClass = !connected
     ? "conn-dot disconnected"
@@ -13,6 +16,12 @@ export function TopBar() {
       : "conn-dot";
 
   const count = orderedIds.length;
+
+  const handleToggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    api.setTheme(next).catch(() => {});
+  };
 
   return (
     <div className="topbar">
@@ -25,6 +34,13 @@ export function TopBar() {
           {count} request{count !== 1 ? "s" : ""}
         </span>
         <button onClick={clearRequests}>Clear</button>
+        <button
+          className="theme-toggle"
+          onClick={handleToggleTheme}
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        >
+          {theme === "dark" ? "\u263C" : "\u263E"}
+        </button>
       </div>
     </div>
   );
