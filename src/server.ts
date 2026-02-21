@@ -196,6 +196,14 @@ export function createRoutes(
         return Response.json({ simulator, certPath: body.certPath });
       }
 
+      // If we reach here for a control-host request, it means no route matched.
+      // Return 404 instead of falling through to the proxy handler, which would
+      // create an infinite loop when the system proxy is enabled (the proxy would
+      // send the request back to itself via the system proxy).
+      if (isControlRequest) {
+        return new Response("Not Found", { status: 404 });
+      }
+
       return yield* _(deps.handleProxy(req));
     }).pipe(Effect.catchAll(() => Effect.sync(() => new Response("Request error", { status: 400 }))));
 }
