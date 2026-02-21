@@ -93,6 +93,7 @@ export function ViewList() {
                   <div
                     className={`scenario-item${isActive ? " active" : ""}`}
                     onClick={() => setActiveView(v.id)}
+                    data-tooltip={v.description || undefined}
                   >
                     <div className="dot" />
                     <span>{v.name || v.id}</span>
@@ -108,9 +109,6 @@ export function ViewList() {
                       </span>
                     )}
                   </div>
-                  {v.description && (
-                    <div className="scenario-desc">{v.description}</div>
-                  )}
                 </div>
               );
             })}

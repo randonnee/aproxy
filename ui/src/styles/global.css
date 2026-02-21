@@ -120,28 +120,61 @@ body {
 
 /* ── Animations ── */
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(0.4rem); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slideInLeft {
-  from { opacity: 0; transform: translateX(-0.5rem); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-0.5rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* ════════════════════════════════════════════
@@ -186,10 +219,12 @@ body {
   flex-shrink: 0;
   transition: all 0.4s var(--ease-out);
 }
+
 .conn-dot.active {
   background: var(--success);
   box-shadow: 0 0 0 0.2rem var(--success-subtle), 0 0 0.5rem rgba(109, 181, 83, 0.2);
 }
+
 .conn-dot.disconnected {
   background: var(--error);
   box-shadow: 0 0 0 0.2rem var(--error-subtle);
@@ -204,6 +239,7 @@ body {
   color: var(--ink-muted);
   -webkit-app-region: no-drag;
 }
+
 .topbar-right .count {
   font-family: var(--mono);
   font-size: 0.8rem;
@@ -229,6 +265,7 @@ body {
   padding: 0;
   line-height: 1;
 }
+
 .theme-toggle:hover {
   background: var(--accent-subtle);
   color: var(--accent);
@@ -264,6 +301,7 @@ body {
   animation: fadeIn 0.3s var(--ease-out);
   transition: border-color 0.3s var(--ease-out);
 }
+
 .sidebar-section:last-child {
   border-bottom: none;
 }
@@ -301,11 +339,13 @@ body {
   cursor: pointer;
   transition: all 0.15s var(--ease-out);
 }
+
 .sidebar-icon-btn:hover {
   background: var(--accent-subtle);
   color: var(--accent);
   border-color: var(--border-accent);
 }
+
 .sidebar-icon-btn.active {
   background: var(--accent-glow);
   color: var(--accent);
@@ -319,13 +359,16 @@ body {
   justify-content: space-between;
   gap: 0.5rem;
 }
+
 .proxy-status .label {
   font-size: 0.95rem;
   font-weight: 500;
 }
+
 .proxy-toggle {
   margin-top: 0.5rem;
 }
+
 .proxy-toggle button {
   width: 100%;
 }
@@ -342,13 +385,16 @@ body {
   transition: all 0.15s var(--ease-out);
   position: relative;
 }
+
 .scenario-item:hover {
   background: var(--accent-subtle);
 }
+
 .scenario-item.active {
   background: var(--accent-glow);
   color: var(--accent);
 }
+
 .scenario-item .dot {
   width: 0.5rem;
   height: 0.5rem;
@@ -358,19 +404,45 @@ body {
   flex-shrink: 0;
   transition: all 0.2s var(--ease-spring);
 }
+
 .scenario-item.active .dot {
   background: var(--accent);
   border-color: var(--accent);
   box-shadow: 0 0 0 0.15rem var(--accent-glow);
   transform: scale(1.1);
 }
-.scenario-desc {
-  font-size: 0.8rem;
-  color: var(--ink-faint);
-  margin-left: 1.6rem;
-  margin-top: 0.15rem;
-  line-height: 1.4;
+
+/* ── Sidebar tooltips ── */
+[data-tooltip] {
+  cursor: pointer;
 }
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  top: 100%;
+  z-index: 20;
+  max-width: 22rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--panel-strong);
+  border: 1px solid var(--border-strong);
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: normal;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.7s;
+}
+
 .view-default-badge {
   font-size: 0.65rem;
   font-weight: 600;
@@ -383,6 +455,7 @@ body {
   padding: 0.15rem 0.4rem;
   border-radius: 0.2rem;
 }
+
 .view-set-default {
   font-size: 0.75rem;
   color: var(--ink-faint);
@@ -391,15 +464,18 @@ body {
   cursor: pointer;
   transition: color 0.15s;
 }
+
 .view-set-default:hover {
   color: var(--accent);
 }
+
 .sidebar-empty {
   font-size: 0.85rem;
   color: var(--ink-faint);
   padding: 0.3rem 0;
   font-style: italic;
 }
+
 .sidebar-btn {
   display: block;
   width: 100%;
@@ -414,22 +490,19 @@ body {
   border-left: 2px solid var(--border);
   animation: slideInLeft 0.2s var(--ease-out);
 }
+
 .rule-item {
   padding: 0.25rem 0;
   font-size: 0.85rem;
   color: var(--ink-muted);
+  position: relative;
 }
+
 .rule-item .rule-name {
-  font-weight: 500;
   color: var(--ink);
   font-size: 0.85rem;
 }
-.rule-item .rule-desc {
-  font-size: 0.7rem;
-  color: var(--ink-faint);
-  margin-top: 0.05rem;
-  line-height: 1.3;
-}
+
 
 /* Simulator list in sidebar */
 .sim-entry {
@@ -442,13 +515,16 @@ body {
   justify-content: space-between;
   align-items: center;
 }
+
 .sim-entry:hover {
   background: var(--accent-subtle);
 }
+
 .sim-entry .sim-name {
   font-weight: 500;
   font-size: 0.95rem;
 }
+
 .sim-badge {
   font-size: 0.7rem;
   font-weight: 500;
@@ -458,24 +534,29 @@ body {
   color: var(--ink-faint);
   transition: all 0.2s;
 }
+
 .sim-badge.booted {
   background: var(--success-subtle);
   color: var(--success);
 }
+
 .sim-entry-row {
   display: flex;
   align-items: center;
   gap: 0.4rem;
 }
+
 .sim-entry-row .sim-entry {
   flex: 1;
   min-width: 0;
 }
+
 .sim-trust-btn {
   flex-shrink: 0;
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
 }
+
 .sim-trust-btn.trusted {
   color: var(--success);
   border-color: rgba(109, 181, 83, 0.2);
@@ -491,10 +572,12 @@ body {
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
+
 .ca-status-row .label {
   font-size: 0.95rem;
   font-weight: 500;
 }
+
 .ca-status-row .state {
   font-size: 0.7rem;
   font-weight: 600;
@@ -504,21 +587,26 @@ body {
   letter-spacing: 0.02rem;
   transition: all 0.2s;
 }
+
 .ca-status-row .state.trusted {
   background: var(--success-subtle);
   color: var(--success);
 }
+
 .ca-status-row .state.untrusted {
   background: var(--warn-subtle);
   color: var(--warn);
 }
+
 .ca-actions {
   display: flex;
   gap: 0.4rem;
 }
+
 .ca-actions button {
   flex: 1;
 }
+
 .ca-note {
   font-size: 0.7rem;
   color: var(--ink-faint);
@@ -566,10 +654,12 @@ body {
   outline: none;
   transition: all 0.2s var(--ease-out);
 }
+
 .toolbar input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 0.15rem var(--accent-glow);
 }
+
 .toolbar input::placeholder {
   color: var(--ink-faint);
 }
@@ -586,6 +676,7 @@ body {
   cursor: pointer;
   transition: all 0.2s var(--ease-out);
 }
+
 .toolbar select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 0.15rem var(--accent-glow);
@@ -605,9 +696,11 @@ body {
   cursor: pointer;
   user-select: none;
 }
+
 .method-chip input[type="checkbox"] {
   display: none;
 }
+
 .method-chip .method-label {
   font-family: var(--mono);
   font-size: 0.7rem;
@@ -620,20 +713,52 @@ body {
   color: var(--ink-faint);
   transition: all 0.15s var(--ease-out);
 }
+
 .method-chip:hover .method-label {
   border-color: var(--border-strong);
   color: var(--ink-muted);
 }
+
 .method-chip.active .method-label {
   background: var(--accent-subtle);
   border-color: var(--border-accent);
 }
-.method-chip.active .method-label.method-GET { color: var(--success); border-color: rgba(109,181,83,0.3); background: var(--success-subtle); }
-.method-chip.active .method-label.method-POST { color: var(--accent); border-color: var(--border-accent); background: var(--accent-subtle); }
-.method-chip.active .method-label.method-PUT { color: var(--warn); border-color: rgba(212,153,58,0.3); background: var(--warn-subtle); }
-.method-chip.active .method-label.method-DELETE { color: var(--error); border-color: rgba(212,106,106,0.3); background: var(--error-subtle); }
-.method-chip.active .method-label.method-PATCH { color: var(--purple); border-color: rgba(168,130,197,0.3); background: var(--purple-subtle); }
-.method-chip.active .method-label.method-CONNECT { color: var(--ink-muted); border-color: var(--border-strong); background: var(--surface); }
+
+.method-chip.active .method-label.method-GET {
+  color: var(--success);
+  border-color: rgba(109, 181, 83, 0.3);
+  background: var(--success-subtle);
+}
+
+.method-chip.active .method-label.method-POST {
+  color: var(--accent);
+  border-color: var(--border-accent);
+  background: var(--accent-subtle);
+}
+
+.method-chip.active .method-label.method-PUT {
+  color: var(--warn);
+  border-color: rgba(212, 153, 58, 0.3);
+  background: var(--warn-subtle);
+}
+
+.method-chip.active .method-label.method-DELETE {
+  color: var(--error);
+  border-color: rgba(212, 106, 106, 0.3);
+  background: var(--error-subtle);
+}
+
+.method-chip.active .method-label.method-PATCH {
+  color: var(--purple);
+  border-color: rgba(168, 130, 197, 0.3);
+  background: var(--purple-subtle);
+}
+
+.method-chip.active .method-label.method-CONNECT {
+  color: var(--ink-muted);
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
 
 /* ════════════════════════════════════════════
    Buttons
@@ -651,28 +776,34 @@ button {
   transition: all 0.15s var(--ease-out);
   white-space: nowrap;
 }
+
 button:hover {
   background: var(--panel-strong);
   color: var(--ink);
   border-color: var(--border-strong);
 }
+
 button:active {
   transform: scale(0.97);
 }
+
 button.primary {
   background: var(--accent-glow);
   color: var(--accent);
   border-color: var(--border-accent);
 }
+
 button.primary:hover {
   background: var(--accent-subtle);
   border-color: var(--accent);
 }
+
 button.danger {
   color: var(--error);
   border-color: rgba(212, 106, 106, 0.2);
   background: var(--error-subtle);
 }
+
 button.danger:hover {
   border-color: rgba(212, 106, 106, 0.4);
 }
@@ -724,12 +855,15 @@ button.danger:hover {
   transition: background 0.1s var(--ease-out);
   animation: slideUp 0.2s var(--ease-out);
 }
+
 .rtable-row:hover {
   background: var(--accent-subtle);
 }
+
 .rtable-row.selected {
   background: var(--accent-glow);
 }
+
 .rtable-row.selected .rtable-td {
   color: var(--ink);
 }
@@ -750,9 +884,11 @@ button.danger:hover {
 .rtable-row.mocked {
   background: var(--purple-subtle);
 }
+
 .rtable-row.mocked .rtable-td {
   color: var(--purple);
 }
+
 .rtable-row.mocked:hover {
   background: rgba(168, 130, 197, 0.15);
 }
@@ -767,6 +903,7 @@ button.danger:hover {
   cursor: col-resize;
   z-index: 3;
 }
+
 .col-resize-handle::after {
   content: "";
   position: absolute;
@@ -776,27 +913,59 @@ button.danger:hover {
   width: 1px;
   background: var(--border-strong);
 }
+
 .col-resize-handle:hover::after {
   background: var(--accent);
   width: 2px;
   right: 1px;
 }
+
 .method {
   font-weight: 600;
   letter-spacing: 0.02rem;
 }
-.method-GET { color: var(--success); }
-.method-POST { color: var(--accent); }
-.method-PUT { color: var(--warn); }
-.method-DELETE { color: var(--error); }
-.method-PATCH { color: var(--purple); }
-.method-CONNECT { color: var(--ink-faint); }
+
+.method-GET {
+  color: var(--success);
+}
+
+.method-POST {
+  color: var(--accent);
+}
+
+.method-PUT {
+  color: var(--warn);
+}
+
+.method-DELETE {
+  color: var(--error);
+}
+
+.method-PATCH {
+  color: var(--purple);
+}
+
+.method-CONNECT {
+  color: var(--ink-faint);
+}
 
 /* Status colors */
-.status-2xx { color: var(--success); }
-.status-3xx { color: var(--accent); }
-.status-4xx { color: var(--warn); }
-.status-5xx { color: var(--error); }
+.status-2xx {
+  color: var(--success);
+}
+
+.status-3xx {
+  color: var(--accent);
+}
+
+.status-4xx {
+  color: var(--warn);
+}
+
+.status-5xx {
+  color: var(--error);
+}
+
 .status-pending {
   color: var(--ink-faint);
   animation: pulse 1.5s ease-in-out infinite;
@@ -857,11 +1026,13 @@ button.danger:hover {
   min-height: 1.8rem;
   overflow: hidden;
 }
+
 .pane-summary .method {
   font-weight: 700;
   font-size: 0.7rem;
   flex-shrink: 0;
 }
+
 .pane-url {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -870,15 +1041,18 @@ button.danger:hover {
   flex: 1;
   min-width: 0;
 }
+
 .pane-time {
   flex-shrink: 0;
   color: var(--ink-faint);
   font-size: 0.7rem;
 }
+
 .pane-duration {
   font-size: 0.75rem;
   color: var(--ink-muted);
 }
+
 .pane-mocked {
   font-size: 0.65rem;
   font-weight: 600;
@@ -889,10 +1063,12 @@ button.danger:hover {
   padding: 0.1rem 0.35rem;
   border-radius: 0.2rem;
 }
+
 .pane-error {
   color: var(--error);
   font-size: 0.75rem;
 }
+
 .pane-pending {
   color: var(--ink-faint);
   font-size: 0.75rem;
@@ -905,10 +1081,22 @@ button.danger:hover {
   font-size: 0.75rem;
   flex-shrink: 0;
 }
-.status-badge.status-2xx { color: var(--success); }
-.status-badge.status-3xx { color: var(--accent); }
-.status-badge.status-4xx { color: var(--warn); }
-.status-badge.status-5xx { color: var(--error); }
+
+.status-badge.status-2xx {
+  color: var(--success);
+}
+
+.status-badge.status-3xx {
+  color: var(--accent);
+}
+
+.status-badge.status-4xx {
+  color: var(--warn);
+}
+
+.status-badge.status-5xx {
+  color: var(--error);
+}
 
 .detail-tabs {
   display: flex;
@@ -926,10 +1114,12 @@ button.danger:hover {
   transition: all 0.15s var(--ease-out);
   user-select: none;
 }
+
 .detail-tab:hover {
   color: var(--ink-muted);
   background: var(--accent-subtle);
 }
+
 .detail-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
@@ -959,6 +1149,7 @@ button.danger:hover {
   font-size: 0.85rem;
   animation: fadeIn 0.2s var(--ease-out);
 }
+
 .headers-table th {
   text-align: left;
   color: var(--ink-faint);
@@ -969,6 +1160,7 @@ button.danger:hover {
   padding: 0.35rem 0.65rem;
   border-bottom: 1px solid var(--border-strong);
 }
+
 .headers-table td {
   padding: 0.3rem 0.65rem;
   border-bottom: 1px solid var(--border);
@@ -976,12 +1168,14 @@ button.danger:hover {
   font-size: 0.8rem;
   transition: border-color 0.3s;
 }
+
 .headers-table td:first-child {
   color: var(--accent);
   width: 15rem;
   white-space: nowrap;
   font-weight: 500;
 }
+
 .headers-table td:last-child {
   color: var(--ink-muted);
   word-break: break-all;
@@ -1015,6 +1209,7 @@ button.danger:hover {
   flex-shrink: 0;
   transition: background 0.15s;
 }
+
 .resize-handle::after {
   content: "";
   position: absolute;
@@ -1028,11 +1223,13 @@ button.danger:hover {
   opacity: 0;
   transition: opacity 0.2s;
 }
+
 .resize-handle:hover::after,
 .resize-handle.dragging::after {
   opacity: 1;
   background: var(--accent);
 }
+
 .resize-handle:hover,
 .resize-handle.dragging {
   background: var(--accent-subtle);
@@ -1045,14 +1242,17 @@ button.danger:hover {
   width: 0.4rem;
   height: 0.4rem;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 0.2rem;
   transition: background 0.2s;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
 }
@@ -1071,6 +1271,7 @@ button.danger:hover {
   font-size: 0.95rem;
   animation: fadeIn 0.4s var(--ease-out);
 }
+
 .empty-state .icon {
   font-size: 2.5rem;
   opacity: 0.2;

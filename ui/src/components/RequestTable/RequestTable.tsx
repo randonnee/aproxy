@@ -33,18 +33,15 @@ export function RequestTable() {
   const widthsRef = useRef<number[]>([]);
   const [colWidths, setColWidths] = useState<number[]>([]);
 
+  const flexIndex = COLUMNS.findIndex((c) => c.initWidth === -1);
+
   // Initialise widths once the container is measured
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || widthsRef.current.length > 0) return;
 
-    const totalWidth = el.clientWidth;
-    const fixedSum = COLUMNS.reduce(
-      (sum, c) => sum + (c.initWidth > 0 ? c.initWidth : 0),
-      0
-    );
     const initial = COLUMNS.map((c) =>
-      c.initWidth > 0 ? c.initWidth : Math.max(c.minWidth, totalWidth - fixedSum)
+      c.initWidth > 0 ? c.initWidth : 0
     );
     widthsRef.current = initial;
     setColWidths(initial);
@@ -55,8 +52,12 @@ export function RequestTable() {
     e.preventDefault();
     e.stopPropagation();
 
+    // Don't allow resizing the flex column directly
+    if (colIndex === flexIndex) return;
+
     const startX = e.clientX;
     const startWidths = [...widthsRef.current];
+    const containerWidth = wrapRef.current?.clientWidth ?? 0;
 
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
@@ -65,6 +66,18 @@ export function RequestTable() {
       const delta = ev.clientX - startX;
       const next = [...startWidths];
       next[colIndex] = Math.max(COLUMNS[colIndex].minWidth, startWidths[colIndex] + delta);
+
+      // Ensure the sum of all fixed columns doesn't squeeze the flex column below its minimum
+      const fixedSum = next.reduce((sum, w, i) => i !== flexIndex ? sum + w : sum, 0);
+      const flexMin = COLUMNS[flexIndex].minWidth;
+      if (fixedSum > containerWidth - flexMin) {
+        // Clamp this column so flex column keeps its minimum width
+        next[colIndex] = Math.max(
+          COLUMNS[colIndex].minWidth,
+          next[colIndex] - (fixedSum - (containerWidth - flexMin))
+        );
+      }
+
       widthsRef.current = next;
       setColWidths(next);
     };
@@ -80,9 +93,10 @@ export function RequestTable() {
     document.addEventListener("mouseup", onUp);
   };
 
+  // Build grid template: fixed columns get px values, flex column gets 1fr
   const gridTemplate =
     colWidths.length > 0
-      ? colWidths.map((w) => `${w}px`).join(" ")
+      ? colWidths.map((w, i) => i === flexIndex ? `minmax(${COLUMNS[i].minWidth}px, 1fr)` : `${w}px`).join(" ")
       : COLUMNS.map((c) => (c.initWidth > 0 ? `${c.initWidth}px` : "1fr")).join(" ");
 
   const ids = orderedIds.filter((id) => {

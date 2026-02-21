@@ -20,7 +20,21 @@ export function SimulatorList() {
 
   return (
     <div className="sidebar-section">
-      <div className="sidebar-title">Simulators</div>
+      <div className="sidebar-title">
+        <span>Simulators</span>
+        <div className="sidebar-title-actions">
+          <button
+            className="sidebar-icon-btn"
+            onClick={handleRefresh}
+            title="Refresh simulators"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 1v5h5" />
+              <path d="M3.5 10a5 5 0 1 0 1-7.5L1 6" />
+            </svg>
+          </button>
+        </div>
+      </div>
       <div>
         {activeSimulators.length === 0 ? (
           <div className="sidebar-empty">No active simulators</div>
@@ -36,9 +50,6 @@ export function SimulatorList() {
           ))
         )}
       </div>
-      <button className="sidebar-btn" onClick={handleRefresh}>
-        Refresh
-      </button>
     </div>
   );
 }

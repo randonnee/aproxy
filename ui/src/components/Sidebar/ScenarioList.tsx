@@ -73,21 +73,20 @@ export function ScenarioList() {
                 <div
                   className={`scenario-item${s.id === activeScenarioId ? " active" : ""}`}
                   onClick={() => handleSetActive(s.id)}
+                  data-tooltip={s.description || undefined}
                 >
                   <div className="dot" />
                   <span>{s.name || s.id}</span>
                 </div>
-                {s.description && (
-                  <div className="scenario-desc">{s.description}</div>
-                )}
                 {s.id === activeScenarioId && s.rules.length > 0 && (
                   <div className="rule-list">
                     {s.rules.map((r) => (
-                      <div key={r.id} className="rule-item">
+                      <div
+                        key={r.id}
+                        className="rule-item"
+                        data-tooltip={r.description || undefined}
+                      >
                         <div className="rule-name">{r.name || r.id}</div>
-                        {r.description && (
-                          <div className="rule-desc">{r.description}</div>
-                        )}
                       </div>
                     ))}
                   </div>
