@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
+    "dev:ui": "npm run dev --prefix ui",
+    "build:ui": "npm run build --prefix ui",
     "start": "bun src/index.ts"
   },
   "devDependencies": {

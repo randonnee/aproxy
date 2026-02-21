@@ -3,11 +3,32 @@ import type { CaCert } from "./ca";
 import type { AproxyConfig } from "./config";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
+import { existsSync } from "node:fs";
+import { join, extname } from "node:path";
 import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
 import { createTcpProxy } from "./tcpProxy";
 
-const uiHtml = await Bun.file(new URL("./ui.html", import.meta.url)).text();
+// Resolve UI dist directory (built React app)
+const uiDistDir = join(import.meta.dir, "..", "ui", "dist");
+const uiAvailable = existsSync(join(uiDistDir, "index.html"));
+
+// Fallback: load legacy single-file UI if the React build isn't available
+const uiHtml = uiAvailable
+  ? await Bun.file(join(uiDistDir, "index.html")).text()
+  : await Bun.file(new URL("./ui.html", import.meta.url)).text();
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
 
 const listLocalHosts = () => {
   const hosts = new Set<string>(["localhost", "127.0.0.1"]);
@@ -284,6 +305,20 @@ export function createRoutes(
           deps.installCaOnSimulator(body.udid).pipe(Effect.mapError((cause) => new RequestError({ cause })))
         );
         return Response.json({ simulator });
+      }
+
+      // Serve static assets from the React UI build (js, css, etc.)
+      if (isControlRequest && uiAvailable && url?.pathname && req.method === "GET") {
+        const safePath = url.pathname.replace(/\.\./g, "");
+        const filePath = join(uiDistDir, safePath);
+        if (existsSync(filePath)) {
+          const file = Bun.file(filePath);
+          const ext = extname(safePath);
+          const contentType = MIME_TYPES[ext] || "application/octet-stream";
+          return new Response(file, {
+            headers: { "Content-Type": contentType },
+          });
+        }
       }
 
       // If we reach here for a control-host request, it means no route matched.
