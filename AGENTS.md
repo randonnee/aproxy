@@ -122,10 +122,61 @@ When a CA certificate is available (auto-generated on first run at `~/.aproxy/`)
 
 The blind tunnel (`src/tunnel.ts`) is preserved as a fallback when no CA is configured.
 
+### MITM data flow
+
+The MITM pipeline has three socket layers:
+
+```
+Client  <--TCP-->  tcpProxy (raw TCP listener, port 8080)
+                       |
+                   clientSocket.data.peer = bridgeSocket
+                       |
+Bridge  <--TCP-->  Bun.connect to 127.0.0.1:ephemeralPort
+                       |
+TLS     <--TLS-->  Bun.listen TLS server (ephemeral port, per-host cert)
+                       |
+                   handleDecryptedData() -> processNext() -> dispatchRequest()
+                       |
+                   fetch() to upstream server
+```
+
+**Request path** (client -> upstream):
+1. Client sends TLS ClientHello through the raw TCP tunnel
+2. `tcpProxy.ts` forwards bytes to `bridgeSocket` (peer)
+3. Bridge socket forwards to the ephemeral TLS listener
+4. TLS listener decrypts and delivers plaintext HTTP to `handleDecryptedData()`
+5. `dispatchRequest()` sends `fetch()` to the real upstream server
+
+**Response path** (upstream -> client):
+1. `dispatchRequest()` reads the full response body from upstream
+2. Writes HTTP/1.1 response to the TLS socket via `socketWrite()` (with backpressure)
+3. TLS socket encrypts the data
+4. Encrypted bytes arrive at bridge socket's `data` handler
+5. Bridge's `writeToClient()` forwards to the client socket (with overflow buffering)
+6. If client socket buffer is full, overflow is queued and flushed via `drain` handler in `tcpProxy.ts`
+
+### Decrypted HTTP parser
+
+The MITM HTTP parser (`src/mitm.ts`) uses a state machine with three functions:
+
+- **`handleDecryptedData()`** — synchronous entry point called by Bun's `data` handler. Accumulates bytes into `ctx.buffer` and calls `processNext()` if not already processing a request.
+- **`processNext()`** — state machine that transitions between `"headers"` (looking for `\r\n\r\n`) and `"body"` (accumulating `Content-Length` bytes). Once a complete request is parsed, calls `dispatchRequest()`.
+- **`dispatchRequest()`** — extracts the request body from the buffer, constructs a `Request`, runs it through the Effect-based fetch handler, reads the full response, and writes it back as raw HTTP/1.1. Uses `ctx.processing` flag to serialize requests (one at a time per connection). After completing, checks for buffered pipelined data and re-enters `processNext()`.
+
+### Backpressure handling
+
+Large responses (e.g. YouTube at ~687KB) require proper backpressure at two levels:
+
+1. **TLS socket writes** (`socketWrite()`): Writes decrypted response data to the TLS socket. If `socket.write()` returns fewer bytes than provided (buffer full), waits for the `drain` event via a Promise resolved by `ctx.drainResolve`. Handles partial writes by looping until all bytes are sent. Body is written in 16KB chunks.
+
+2. **Client socket writes** (`writeToClient()` / `flushClientOverflow()`): The bridge socket receives encrypted data from the TLS server and forwards it to the client socket. If `clientSocket.write()` returns a partial write, the remainder is queued in `clientOverflow[]`. The `drain` handler in `tcpProxy.ts` calls `flushClientOverflow()` to send queued data when the client socket buffer has space.
+
 ### Known Bun caveats
 
 - **`socket.data` timing**: In `Bun.listen` TLS handlers, the `data` callback can fire before `open` sets `socket.data`. The MITM implementation uses closure-captured context instead.
 - **Concurrent cert generation**: Multiple CONNECT requests to the same host use in-flight promise deduplication and UUID-suffixed temp files to avoid collisions.
+- **ALPN wire format**: `Bun.listen` TLS config accepts `ALPNProtocols` as `string | BufferSource`. A plain string like `"http/1.1"` breaks the TLS handshake. The correct format is a wire-format Buffer with length-prefixed protocol names: `Buffer.from("\x08http/1.1")` where `\x08` is the byte length of `"http/1.1"`.
+- **`socket.write()` backpressure**: `socket.write()` returns the number of bytes actually written. When the send buffer is full, it returns 0 or a partial count — remaining bytes are silently discarded unless the caller handles this. The `drain` event fires when buffer space is available.
 
 ## Proxy configuration
 
@@ -135,11 +186,15 @@ API endpoints: `POST /proxy/enable`, `POST /proxy/disable`, `GET /proxy/status`.
 
 ## CA certificate management
 
-The CA is auto-generated on first run and stored at `~/.aproxy/`. API endpoints for certificate trust:
+The CA is auto-generated on first run and stored at `~/.aproxy/`. The CA certificate is generated with proper X.509 extensions (`basicConstraints=critical,CA:TRUE`, `keyUsage=critical,keyCertSign,cRLSign`, `subjectKeyIdentifier=hash`) required by browsers like Chrome.
+
+CA trust is installed in the **user login keychain** (`~/Library/Keychains/login.keychain-db`) with unconditional SSL trust (`-p ssl`). This avoids requiring admin privileges and works reliably with Chrome, which uses the Chrome Root Store and reads from the login keychain.
+
+API endpoints for certificate trust:
 
 - `GET /ca/cert` — download the CA certificate PEM file
 - `GET /ca/status` — check if CA is initialized, get cert path and trust command
-- `POST /ca/trust` — trust the CA in the macOS system keychain (requires sudo)
+- `POST /ca/trust` — trust the CA in the macOS login keychain (no admin required)
 - `GET /ca/trust/status` — check if the CA is already trusted on the host
 - `POST /simulators/trust-ca` — install the CA cert on a booted iOS simulator (body: `{ "udid": "..." }`)
 
@@ -227,6 +282,79 @@ Key patterns:
 - `src/simulators.ts`: all exported functions return `Effect<T, CommandError>`. The internal `runCommand` helper spawns a subprocess and yields `CommandError` on non-zero exit.
 - `src/ca.ts`: `ensureCa()` and `generateCa()` return `Effect<CaCert, CommandError>`. The MITM hot path uses `runOpensslAsync` (Promise-based, throws `CommandError`) because `getHostCert`/`generateHostCert` are called from `Bun.listen` callbacks which cannot be Effect generators.
 - `src/server.ts`: deps type signatures use `CommandError` for simulator/proxy/CA operations. The `catchAll` handler logs and returns descriptive error messages.
+
+## Issues encountered and solutions (Chrome HTTPS interception)
+
+Getting Chrome to work through the MITM proxy required solving five distinct issues. Safari and curl worked before these fixes; Chrome has stricter requirements.
+
+### 1. ALPN protocol negotiation (Chrome uses HTTP/2 by default)
+
+**Problem**: Chrome negotiates HTTP/2 via ALPN during the TLS handshake. The MITM TLS listener didn't specify ALPN protocols, so Chrome would negotiate h2 and send HTTP/2 frames. The decrypted HTTP parser only understands HTTP/1.1, so it saw binary garbage instead of text-based request lines.
+
+**Symptom**: Corrupted URLs like `https://clients4.google.com3C͕#Ə...` in the request log, or completely silent failures.
+
+**Fix**: Added `ALPNProtocols: Buffer.from("\x08http/1.1")` to the `Bun.listen` TLS config in `src/mitm.ts`. This tells the client during TLS negotiation that only HTTP/1.1 is supported. Chrome falls back to HTTP/1.1 gracefully.
+
+**Bun caveat**: Bun's `ALPNProtocols` field accepts `string | BufferSource`, but passing a plain string `"http/1.1"` breaks the TLS handshake entirely (the client gets a TLS error and the connection fails). The value must be a wire-format Buffer with length-prefixed protocol names per the TLS ALPN extension spec: `Buffer.from("\x08http/1.1")` where `\x08` (8) is the byte length of `"http/1.1"`.
+
+### 2. CA certificate missing keyUsage extensions
+
+**Problem**: The original `generateCa()` in `src/ca.ts` used `openssl req -new -x509` without any X.509 extensions. The resulting CA certificate had no `basicConstraints` or `keyUsage` fields. Chrome's certificate validation requires `basicConstraints=CA:TRUE` and `keyUsage=keyCertSign` for a certificate to be accepted as a CA that can sign leaf certs.
+
+**Symptom**: Chrome showed `ERR_CERT_AUTHORITY_INVALID` even after trusting the CA in the keychain. Safari was more lenient and accepted it.
+
+**Fix**: Added `-addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash"` flags to the `openssl req` command in `generateCa()`. After changing this, the old CA files at `~/.aproxy/` must be deleted so they are regenerated on next start.
+
+### 3. CA trust location and SSL policy (Chrome Root Store)
+
+**Problem**: The original trust command (`security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain`) had two issues:
+- It required `sudo` (admin privileges) to write to the system keychain
+- It set generic trust, not SSL-specific trust. Chrome uses the Chrome Root Store and checks for explicit SSL trust policy
+
+**Symptom**: Chrome showed `ERR_CERT_AUTHORITY_INVALID` even with the CA in the system keychain. The `security` command prompted for admin password via GUI dialog.
+
+**Fix**: Changed `trustCaCertOnHost()` in `src/simulators.ts` to install trust in the **user login keychain** with explicit SSL trust policy:
+```
+security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db <cert>
+```
+The `-p ssl` flag sets unconditional SSL trust (not just "always trust"). Using the login keychain avoids admin privileges entirely. Chrome reads trusted certs from the login keychain reliably.
+
+### 4. Content-Encoding mismatch (double decompression)
+
+**Problem**: Bun's `fetch()` transparently decompresses gzip/br/deflate response bodies. The proxy was forwarding the decompressed body but keeping the original `content-encoding` header and the original (compressed) `content-length` from upstream. Chrome would attempt to decompress the already-decompressed body, resulting in garbled content or errors.
+
+**Symptom**: Pages loaded but content was corrupted or truncated. `content-length` didn't match the actual body size.
+
+**Fix**: In `src/proxy.ts` (`computeProxyOutcome`), after reading the response body via `arrayBuffer()`:
+- Delete the `content-encoding` header (body is no longer encoded)
+- Set `content-length` to the actual decompressed body size (`bodyBytes.byteLength`)
+
+This fix is in the shared proxy pipeline, so it applies to both HTTP and MITM-intercepted HTTPS requests.
+
+### 5. Large response truncation (backpressure)
+
+**Problem**: Bun's `socket.write()` returns the number of bytes actually written. When the socket send buffer is full, it returns 0 or a partial count, and remaining bytes are silently discarded. For large responses (YouTube's homepage is ~687KB), the buffer fills up and data is lost.
+
+**Symptom**: YouTube pages consistently truncated at exactly 327,680 bytes (320KB = 20 x 16KB TLS records). The response would end mid-HTML, breaking the page.
+
+**Fix**: Backpressure handling at two levels:
+
+**Level 1 — TLS socket writes** (`socketWrite()` in `src/mitm.ts`): The response body is written in 16KB chunks. After each `socket.write()`, if fewer bytes were written than provided, the function awaits a Promise that is resolved by the TLS socket's `drain` event handler. It loops until all bytes are sent, handling partial writes correctly.
+
+**Level 2 — Client socket writes** (`writeToClient()` / `flushClientOverflow()` in `src/mitm.ts`): The bridge socket receives encrypted data from the TLS server and forwards it to the client socket. If `clientSocket.write()` returns a partial write, the remainder is queued in an overflow buffer (`clientOverflow[]`). The client socket's `drain` handler in `tcpProxy.ts` calls `flushClientOverflow()` to send queued data when buffer space becomes available. This required adding a `flushOverflow` callback to the `SocketData` type in `tcpProxy.ts`.
+
+### 6. MITM HTTP parser issues (original `handleDecryptedData`)
+
+**Problem**: The original MITM HTTP parser was a single `async` function called from Bun's synchronous `data` handler. Multiple issues:
+- Being `async`, concurrent `data` events could corrupt shared state (race condition)
+- GET/HEAD requests discarded any trailing bytes in the buffer (pipelined requests lost)
+- Request body spanning multiple `data` events wasn't properly accumulated
+- No request line validation — binary data (from h2 before ALPN fix) was interpreted as URLs
+
+**Fix**: Rewrote the parser as a three-function state machine:
+- `handleDecryptedData()` — synchronous accumulator, only appends to buffer and kicks off processing if idle
+- `processNext()` — state machine transitioning between `"headers"` and `"body"` states, preserves unconsumed buffer bytes
+- `dispatchRequest()` — async request forwarding with `ctx.processing` flag preventing concurrent handling; re-enters `processNext()` after completing to handle pipelined requests
 
 ## Testing
 

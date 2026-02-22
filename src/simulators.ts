@@ -213,17 +213,28 @@ export function installSimulatorCertificate(input: { udid: string; certPath: str
  */
 export function trustCaCertOnHost(certPath: string): Effect.Effect<{ trusted: boolean; certPath: string }, CommandError> {
   return Effect.gen(function* (_) {
-    const script = `do shell script "security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certPath}" with administrator privileges`;
-    yield* _(runCommand("osascript", ["-e", script]));
+    // Trust in the user's login keychain with -p ssl for unconditional SSL trust.
+    // Chrome reads from the login keychain more reliably than the system keychain,
+    // and this avoids requiring admin privileges.
+    yield* _(runCommand("security", [
+      "add-trusted-cert",
+      "-r", "trustRoot",
+      "-p", "ssl",
+      "-k", join(homedir(), "Library/Keychains/login.keychain-db"),
+      certPath,
+    ]));
     return { trusted: true, certPath };
   });
 }
 
 /**
- * Check whether a CA certificate is already trusted in the system keychain.
+ * Check whether a CA certificate is already trusted in the login keychain.
  */
 export function isCaTrustedOnHost(cn: string): Effect.Effect<boolean, never> {
-  return runCommand("security", ["find-certificate", "-c", cn, "/Library/Keychains/System.keychain"]).pipe(
+  return runCommand("security", [
+    "find-certificate", "-c", cn,
+    join(homedir(), "Library/Keychains/login.keychain-db"),
+  ]).pipe(
     Effect.map(() => true),
     Effect.catchAll(() => Effect.succeed(false)),
   );

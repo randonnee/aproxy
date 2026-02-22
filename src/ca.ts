@@ -103,7 +103,7 @@ export function ensureCa(): Effect.Effect<CaCert, CommandError> {
       console.log("[ca] Generating new root CA certificate...");
       yield* _(generateCa());
       console.log(`[ca] Root CA saved to ${CA_CERT_PATH}`);
-      console.log(`[ca] Trust it: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${CA_CERT_PATH}`);
+      console.log(`[ca] Trust it: security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db ${CA_CERT_PATH}`);
     }
 
     const [keyPem, certPem] = yield* _(
@@ -132,7 +132,9 @@ function generateCa(): Effect.Effect<void, CommandError> {
       "2048",
     ]));
 
-    // Generate self-signed root CA certificate
+    // Generate self-signed root CA certificate with proper extensions.
+    // Chrome requires basicConstraints=CA:TRUE and keyUsage=keyCertSign to
+    // accept a certificate as a valid CA for issuing leaf certs.
     yield* _(runOpenssl([
       "req",
       "-new", "-x509",
@@ -141,6 +143,9 @@ function generateCa(): Effect.Effect<void, CommandError> {
       "-days", String(CA_DAYS),
       "-subj", "/CN=aproxy CA/O=aproxy/C=US",
       "-sha256",
+      "-addext", "basicConstraints=critical,CA:TRUE",
+      "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+      "-addext", "subjectKeyIdentifier=hash",
     ]));
   });
 }

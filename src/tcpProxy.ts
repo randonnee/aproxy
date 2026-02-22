@@ -33,6 +33,8 @@ type SocketData = {
   bodyBuffer?: Buffer;
   /** Expected Content-Length */
   expectedBodyLength?: number;
+  /** Flush overflow callback for MITM backpressure handling */
+  flushOverflow?: () => void;
 };
 
 type FetchHandler = (req: Request) => Effect.Effect<Response, any>;
@@ -176,7 +178,10 @@ export function createTcpProxy(opts: {
         }
       },
 
-      drain(_socket) {}
+      drain(socket) {
+        // Flush any MITM overflow data queued due to backpressure
+        socket.data.flushOverflow?.();
+      }
     }
   });
 }

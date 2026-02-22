@@ -372,7 +372,7 @@ export function createRoutes(
           initialized: certPath !== null,
           certPath,
           trustCommand: certPath
-            ? `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certPath}`
+            ? `security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db ${certPath}`
             : null,
         });
       }

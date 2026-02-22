@@ -101,6 +101,15 @@ export function computeProxyOutcome(
         Effect.mapError((cause) => new ProxyError({ cause }))
       )
     );
+
+    // Bun's fetch() transparently decompresses gzip/br/deflate bodies, so the
+    // ArrayBuffer we have is already decompressed.  Fix headers to match:
+    // - Remove content-encoding (body is no longer encoded)
+    // - Replace content-length with the actual decompressed size
+    if (responseHeaders.has("content-encoding")) {
+      responseHeaders.delete("content-encoding");
+    }
+    responseHeaders.set("content-length", String(bodyBytes.byteLength));
     let bodyText: string | undefined;
     try {
       bodyText = new TextDecoder().decode(bodyBytes);

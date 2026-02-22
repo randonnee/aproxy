@@ -32,7 +32,49 @@ type MitmContext = {
   fetchHandler: FetchHandler;
   /** Whether a request is currently being processed (prevents concurrent handling) */
   processing: boolean;
+  /** Parser state: "headers" = waiting for full headers, "body" = waiting for full body */
+  state: "headers" | "body";
+  /** Parsed request info (set during "body" state while waiting for body bytes) */
+  pendingRequest?: {
+    method: string;
+    path: string;
+    headers: Headers;
+    expectedBodyLength: number;
+  };
+  /** Resolve function for the current drain wait (backpressure) */
+  drainResolve?: () => void;
 };
+
+/**
+ * Write data to a socket, waiting for drain if the socket buffer is full.
+ * Handles partial writes by retrying remaining bytes after each drain.
+ */
+async function socketWrite(socket: Socket<{}>, data: string | Uint8Array, ctx: MitmContext): Promise<void> {
+  // Convert string to Buffer so we can slice it for partial writes
+  let buf: Uint8Array = typeof data === "string" ? Buffer.from(data) : data;
+  let offset = 0;
+
+  while (offset < buf.length) {
+    const slice = offset === 0 ? buf : buf.subarray(offset);
+    const written = socket.write(slice);
+    if (written === 0) {
+      // Socket buffer completely full — wait for drain
+      await new Promise<void>((resolve) => {
+        ctx.drainResolve = resolve;
+      });
+      ctx.drainResolve = undefined;
+    } else {
+      offset += written;
+      if (offset < buf.length) {
+        // Partial write — wait for drain before sending the rest
+        await new Promise<void>((resolve) => {
+          ctx.drainResolve = resolve;
+        });
+        ctx.drainResolve = undefined;
+      }
+    }
+  }
+}
 
 /**
  * Handle a CONNECT request with MITM interception.
@@ -74,6 +116,7 @@ export async function handleMitm(
       emitEvent,
       fetchHandler,
       processing: false,
+      state: "headers",
     };
 
     // Start a local TLS listener on an ephemeral port
@@ -83,6 +126,9 @@ export async function handleMitm(
       tls: {
         key: hostCert.keyPem,
         cert: hostCert.certPem + "\n" + ca.certPem, // chain: leaf + CA
+        // ALPN: Bun accepts a wire-format Buffer (length-prefixed protocol names)
+        // \x08 = 8 bytes for "http/1.1"
+        ALPNProtocols: Buffer.from("\x08http/1.1"),
       },
       socket: {
         open(_socket) {
@@ -91,6 +137,10 @@ export async function handleMitm(
         data(socket, data) {
           // Accumulate decrypted HTTP data and process
           handleDecryptedData(socket, data, ctx);
+        },
+        drain(socket) {
+          // Socket buffer drained — resolve any pending write
+          ctx.drainResolve?.();
         },
         close(_socket) {
           // TLS client disconnected
@@ -103,6 +153,51 @@ export async function handleMitm(
 
     const localPort = (tlsListener as any).port as number;
 
+    // Overflow buffer for client socket backpressure.
+    // When the client socket can't keep up, we queue bytes here
+    // and flush them from the client socket's drain handler.
+    let clientOverflow: Buffer[] = [];
+
+    /**
+     * Write data to the client socket with backpressure handling.
+     * If the client socket buffer is full, queue remaining bytes in clientOverflow.
+     */
+    function writeToClient(data: Buffer | Uint8Array) {
+      // If there's already overflow queued, just append (preserve ordering)
+      if (clientOverflow.length > 0) {
+        clientOverflow.push(Buffer.from(data));
+        return;
+      }
+
+      const written = clientSocket.write(data);
+      if (written < data.length) {
+        // Partial or zero write — queue the remainder
+        clientOverflow.push(Buffer.from(data.subarray(written)));
+      }
+    }
+
+    /**
+     * Flush overflow buffer to the client socket.
+     * Called from the client socket's drain handler (set up in tcpProxy.ts).
+     */
+    function flushClientOverflow() {
+      while (clientOverflow.length > 0) {
+        const chunk = clientOverflow[0];
+        const written = clientSocket.write(chunk);
+        if (written === 0) {
+          // Still full — wait for next drain
+          return;
+        }
+        if (written < chunk.length) {
+          // Partial write — keep remainder at front of queue
+          clientOverflow[0] = Buffer.from(chunk.subarray(written));
+          return;
+        }
+        // Fully written — remove from queue
+        clientOverflow.shift();
+      }
+    }
+
     // Now bridge: connect to our local TLS listener and pipe data from the client
     await Bun.connect<{ peer: Socket<any> }>({
       hostname: "127.0.0.1",
@@ -113,6 +208,9 @@ export async function handleMitm(
 
           // Link the client to the bridge
           clientSocket.data.peer = bridgeSocket;
+
+          // Store the flush function so tcpProxy drain handler can call it
+          clientSocket.data.flushOverflow = flushClientOverflow;
 
           // Tell the client the tunnel is established
           clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
@@ -125,7 +223,7 @@ export async function handleMitm(
         },
         data(bridgeSocket, data) {
           // TLS listener -> client (encrypted responses)
-          bridgeSocket.data.peer?.write(data);
+          writeToClient(Buffer.from(data));
         },
         close(bridgeSocket) {
           bridgeSocket.data.peer?.end();
@@ -178,135 +276,199 @@ export async function handleMitm(
 /**
  * Handle decrypted data from the TLS socket.
  * Parse HTTP requests and forward through the proxy pipeline.
+ *
+ * This function is called synchronously by Bun's socket data handler.
+ * It accumulates bytes and kicks off async processing, ensuring only
+ * one request is processed at a time via the processing flag.
  */
-async function handleDecryptedData(
+function handleDecryptedData(
   socket: Socket<{}>,
   data: Buffer | Uint8Array,
   ctx: MitmContext
 ) {
-  const { hostname, port, fetchHandler } = ctx;
-
   // Accumulate bytes
-  ctx.buffer = Buffer.concat([ctx.buffer, Buffer.from(data)]);
+  if (data.length > 0) {
+    ctx.buffer = Buffer.concat([ctx.buffer, Buffer.from(data)]);
+  }
 
-  // If we're already processing a request, just accumulate and return
+  // If we're already processing a request, just accumulate and return.
+  // When processing finishes, it will re-enter via processNext().
   if (ctx.processing) return;
 
-  // Look for end-of-headers
-  const headerEnd = ctx.buffer.indexOf("\r\n\r\n");
-  if (headerEnd === -1) {
-    if (ctx.buffer.length > 65536) {
-      socket.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
-      socket.end();
-    }
-    return;
-  }
+  processNext(socket, ctx);
+}
 
+/**
+ * Try to parse and process the next request from the buffer.
+ * Called after accumulation or after a previous request completes.
+ */
+function processNext(socket: Socket<{}>, ctx: MitmContext) {
+  const { hostname, port } = ctx;
+
+  if (ctx.state === "headers") {
+    // Look for end-of-headers
+    const headerEnd = ctx.buffer.indexOf("\r\n\r\n");
+    if (headerEnd === -1) {
+      if (ctx.buffer.length > 65536) {
+        socket.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
+        socket.end();
+      }
+      return; // Wait for more data
+    }
+
+    const headerSection = ctx.buffer.subarray(0, headerEnd).toString("utf-8");
+    const remaining = ctx.buffer.subarray(headerEnd + 4);
+    ctx.buffer = Buffer.from(remaining);
+
+    const lines = headerSection.split("\r\n");
+    const firstLine = lines[0];
+    const parts = firstLine.split(" ");
+    const method = parts[0];
+    const path = parts[1] ?? "/";
+
+    // Validate this looks like a real HTTP request line
+    const validMethods = new Set(["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"]);
+    if (!validMethods.has(method) || parts.length < 3 || !parts[2]?.startsWith("HTTP/")) {
+      console.error(`[mitm] invalid HTTP request line from ${hostname}:${port}: ${firstLine.substring(0, 80)}`);
+      return;
+    }
+
+    // Parse headers
+    const headers = new Headers();
+    for (let i = 1; i < lines.length; i++) {
+      const colonIdx = lines[i].indexOf(":");
+      if (colonIdx > 0) {
+        const name = lines[i].substring(0, colonIdx).trim();
+        const value = lines[i].substring(colonIdx + 1).trim();
+        headers.append(name, value);
+      }
+    }
+
+    const contentLengthStr = headers.get("content-length");
+    const expectedBodyLength = (method !== "GET" && method !== "HEAD" && contentLengthStr)
+      ? parseInt(contentLengthStr, 10)
+      : 0;
+
+    if (expectedBodyLength > 0 && ctx.buffer.length < expectedBodyLength) {
+      // Need more body bytes — save parsed state and wait
+      ctx.state = "body";
+      ctx.pendingRequest = { method, path, headers, expectedBodyLength };
+      return;
+    }
+
+    // We have everything — dispatch immediately
+    dispatchRequest(socket, ctx, method, path, headers, expectedBodyLength);
+
+  } else if (ctx.state === "body") {
+    // Waiting for body bytes
+    const req = ctx.pendingRequest!;
+    if (ctx.buffer.length < req.expectedBodyLength) {
+      return; // Still waiting
+    }
+    // Got enough — dispatch
+    ctx.state = "headers";
+    ctx.pendingRequest = undefined;
+    dispatchRequest(socket, ctx, req.method, req.path, req.headers, req.expectedBodyLength);
+  }
+}
+
+/**
+ * Dispatch a fully-parsed HTTP request through the proxy pipeline.
+ * Serializes the response back as raw HTTP/1.1 over the TLS socket.
+ */
+function dispatchRequest(
+  socket: Socket<{}>,
+  ctx: MitmContext,
+  method: string,
+  path: string,
+  headers: Headers,
+  bodyLength: number
+) {
+  const { hostname, port, fetchHandler } = ctx;
   ctx.processing = true;
 
-  const headerSection = ctx.buffer.subarray(0, headerEnd).toString("utf-8");
-  const bodyStart = ctx.buffer.subarray(headerEnd + 4);
-
-  // Reset buffer
-  ctx.buffer = Buffer.alloc(0);
-
-  const lines = headerSection.split("\r\n");
-  const firstLine = lines[0];
-  const parts = firstLine.split(" ");
-  const method = parts[0];
-  const path = parts[1] ?? "/";
-
-  // Parse headers
-  const headers = new Headers();
-  for (let i = 1; i < lines.length; i++) {
-    const colonIdx = lines[i].indexOf(":");
-    if (colonIdx > 0) {
-      const name = lines[i].substring(0, colonIdx).trim();
-      const value = lines[i].substring(colonIdx + 1).trim();
-      headers.append(name, value);
-    }
+  // Extract body from buffer
+  let requestBody: Uint8Array | undefined;
+  if (bodyLength > 0) {
+    requestBody = new Uint8Array(ctx.buffer.subarray(0, bodyLength));
+    ctx.buffer = Buffer.from(ctx.buffer.subarray(bodyLength));
   }
 
-  // Build the full URL (the client sends relative paths inside the TLS tunnel)
   const url = `https://${hostname}${port !== 443 ? `:${port}` : ""}${path}`;
-
-  // Build request body
-  const contentLength = headers.get("content-length");
-  const hasBody = method !== "GET" && method !== "HEAD" && contentLength && parseInt(contentLength, 10) > 0;
-
-  let requestBody: Buffer | undefined;
-  if (hasBody) {
-    const expectedLength = parseInt(contentLength!, 10);
-    if (bodyStart.length >= expectedLength) {
-      requestBody = Buffer.from(bodyStart.subarray(0, expectedLength));
-      // Put remaining bytes back in buffer for next request
-      if (bodyStart.length > expectedLength) {
-        ctx.buffer = Buffer.from(bodyStart.subarray(expectedLength));
-      }
-    } else {
-      // Body not fully received yet - for now handle what we have
-      requestBody = Buffer.from(bodyStart);
-    }
-  }
 
   const request = new Request(url, {
     method,
     headers,
-    body: requestBody ? new Uint8Array(requestBody) as BodyInit : undefined,
+    body: requestBody ? requestBody as BodyInit : undefined,
   });
 
-  try {
-    const response = await Effect.runPromise(fetchHandler(request));
+  // Run async work
+  (async () => {
+    try {
+      const response = await Effect.runPromise(fetchHandler(request));
 
-    // Serialize response as raw HTTP back through the TLS socket
-    const statusText = response.statusText || "OK";
-    let headerStr = `HTTP/1.1 ${response.status} ${statusText}\r\n`;
-    response.headers.forEach((value, key) => {
-      headerStr += `${key}: ${value}\r\n`;
-    });
-
-    // Stream body
-    if (response.body) {
-      const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
+      // Read full body first so we know the exact length
+      let bodyBytes: Uint8Array | null = null;
+      if (response.body) {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
         }
-      } finally {
-        reader.releaseLock();
+        if (chunks.length === 1) {
+          bodyBytes = chunks[0];
+        } else if (chunks.length > 1) {
+          const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+          bodyBytes = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bodyBytes.set(chunk, offset);
+            offset += chunk.length;
+          }
+        }
       }
 
-      // Calculate content length from the actual body
-      const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-      // Only set content-length if not already present
-      if (!response.headers.has("content-length")) {
-        headerStr += `content-length: ${totalLength}\r\n`;
-      }
+      const totalLength = bodyBytes?.length ?? 0;
+
+      // Build response headers — always use our computed content-length
+      const statusText = response.statusText || "OK";
+      let headerStr = `HTTP/1.1 ${response.status} ${statusText}\r\n`;
+      response.headers.forEach((value, key) => {
+        // Skip content-length from upstream — we set the correct one below
+        if (key === "content-length") return;
+        headerStr += `${key}: ${value}\r\n`;
+      });
+      headerStr += `content-length: ${totalLength}\r\n`;
       headerStr += "\r\n";
 
-      socket.write(headerStr);
-      for (const chunk of chunks) {
-        socket.write(chunk);
+      await socketWrite(socket, headerStr, ctx);
+      if (bodyBytes) {
+        // Write body in chunks to avoid overwhelming the socket buffer
+        const CHUNK_SIZE = 16384; // 16KB chunks
+        for (let offset = 0; offset < bodyBytes.length; offset += CHUNK_SIZE) {
+          const end = Math.min(offset + CHUNK_SIZE, bodyBytes.length);
+          const chunk = bodyBytes.subarray(offset, end);
+          await socketWrite(socket, chunk, ctx);
+        }
       }
-    } else {
-      if (!response.headers.has("content-length")) {
-        headerStr += "content-length: 0\r\n";
-      }
-      headerStr += "\r\n";
-      socket.write(headerStr);
+    } catch (err: any) {
+      console.error(`[mitm] proxy error for ${method} ${url}:`, err?.message ?? err);
+      socket.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
     }
-  } catch (err: any) {
-    console.error(`[mitm] proxy error for ${method} ${url}:`, err?.message ?? err);
-    socket.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
-  }
 
-  ctx.processing = false;
+    ctx.processing = false;
+    ctx.state = "headers";
+    ctx.pendingRequest = undefined;
 
-  // Check if there's another request buffered (HTTP/1.1 keep-alive / pipelining)
-  if (ctx.buffer.length > 0) {
-    handleDecryptedData(socket, Buffer.alloc(0), ctx);
-  }
+    // Process next request if data is buffered (keep-alive)
+    if (ctx.buffer.length > 0) {
+      processNext(socket, ctx);
+    }
+  })();
 }
