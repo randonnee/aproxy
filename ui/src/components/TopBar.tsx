@@ -2,18 +2,10 @@ import { useAppStore } from "../stores/appStore";
 import * as api from "../lib/api";
 
 export function TopBar() {
-  const connected = useAppStore((s) => s.connected);
-  const proxyEnabled = useAppStore((s) => s.proxyEnabled);
   const orderedIds = useAppStore((s) => s.orderedIds);
   const clearRequests = useAppStore((s) => s.clearRequests);
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
-
-  const dotClass = !connected
-    ? "conn-dot disconnected"
-    : proxyEnabled
-      ? "conn-dot active"
-      : "conn-dot";
 
   const count = orderedIds.length;
 
@@ -25,8 +17,9 @@ export function TopBar() {
 
   return (
     <div className="topbar">
+      {/* Drag region overlay for Electrobun window dragging (sits behind content) */}
+      <div className="topbar-drag electrobun-webkit-app-region-drag" />
       <div className="topbar-left">
-        <div className={dotClass} />
         <h1>Aproxy</h1>
       </div>
       <div className="topbar-right">

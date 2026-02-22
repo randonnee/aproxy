@@ -190,9 +190,33 @@ body {
   padding: 0 1.2rem;
   flex-shrink: 0;
   -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
   transition: background 0.3s var(--ease-out), border-color 0.3s var(--ease-out);
   position: relative;
   z-index: 10;
+}
+
+/* Drag overlay for Electrobun (WKWebView): covers the topbar so empty
+   space is draggable.  Content sits above via position:relative. */
+.topbar-drag {
+  position: absolute;
+  inset: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.topbar-left,
+.topbar-right {
+  position: relative;
+}
+
+/* Extra left padding for macOS traffic-light buttons in hiddenInset titlebar */
+html.desktop-app .topbar {
+  padding-left: 5rem;
+  padding-left: max(5rem, 80px);
 }
 
 .topbar-left {
@@ -209,26 +233,6 @@ body {
   letter-spacing: -0.01em;
   color: var(--ink);
   transition: color 0.2s;
-}
-
-.conn-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: var(--ink-faint);
-  flex-shrink: 0;
-  transition: all 0.4s var(--ease-out);
-}
-
-.conn-dot.active {
-  background: var(--success);
-  box-shadow: 0 0 0 0.2rem var(--success-subtle), 0 0 0.5rem rgba(109, 181, 83, 0.2);
-}
-
-.conn-dot.disconnected {
-  background: var(--error);
-  box-shadow: 0 0 0 0.2rem var(--error-subtle);
-  animation: pulse 2s ease-in-out infinite;
 }
 
 .topbar-right {

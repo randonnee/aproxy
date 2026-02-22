@@ -239,7 +239,7 @@ Key patterns:
 The project uses Electrobun (not Electron) for the desktop build. Electrobun uses Bun as its runtime, so all existing networking code runs unchanged.
 
 - `electrobun.config.ts` — build config
-- `src/bun/index.ts` — desktop entry point, sets resource env vars, creates BrowserWindow loading `http://127.0.0.1:8080`
+- `src/electrobun/index.ts` — desktop entry point, sets resource env vars, creates BrowserWindow loading `http://127.0.0.1:8080`
 - `scripts/build-ui.ts` — preBuild hook (builds React UI)
 - Dev: `bunx electrobun dev`
 - Production: `bunx electrobun build --env=stable` (outputs DMG to `artifacts/`)

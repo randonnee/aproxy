@@ -20,6 +20,13 @@ export function App() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
+  // Detect Electrobun desktop app for traffic-light button spacing
+  useEffect(() => {
+    if ((window as any).__electrobunWebviewId != null) {
+      document.documentElement.classList.add("desktop-app");
+    }
+  }, []);
+
   return (
     <>
       <TopBar />

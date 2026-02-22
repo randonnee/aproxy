@@ -8,7 +8,7 @@ export default {
   },
   build: {
     bun: {
-      entrypoint: "src/bun/index.ts",
+      entrypoint: "src/electrobun/index.ts",
     },
     copy: {
       "ui/dist/index.html": "views/mainview/index.html",
