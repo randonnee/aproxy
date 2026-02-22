@@ -418,21 +418,14 @@ html.desktop-app .topbar {
   color: var(--accent);
 }
 
-.scenario-item .dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: transparent;
-  border: 1.5px solid var(--ink-faint);
+.scenario-item .scenario-checkbox {
   flex-shrink: 0;
+  color: var(--ink-faint);
   transition: all 0.2s var(--ease-spring);
 }
 
-.scenario-item.active .dot {
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 0.15rem var(--accent-glow);
-  transform: scale(1.1);
+.scenario-item.active .scenario-checkbox {
+  color: var(--accent);
 }
 
 /* ── Info tooltip ── */

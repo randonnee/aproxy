@@ -27,7 +27,7 @@ import { homedir } from "node:os";
 const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
 let loadedScenarios: LoadedScenario[] = [];
-let activeScenarioId: string | null = null;
+let activeScenarioIds: string[] = [];
 let loadedViews: LoadedView[] = [];
 let proxyEnabled = false;
 let config: AproxyConfig = loadConfig();
@@ -107,11 +107,9 @@ const listRulesEvent = (): RulesListEvent => ({
   rules: loadedScenarios.flatMap((scenario) =>
     scenario.rules.map(({ id, name, description }) => ({ id, name, description }))
   ),
-  activeRuleIds: activeScenarioId
-    ? loadedScenarios
-        .find((scenario) => scenario.id === activeScenarioId)
-        ?.rules.map((rule) => rule.id) ?? []
-    : []
+  activeRuleIds: loadedScenarios
+    .filter((scenario) => activeScenarioIds.includes(scenario.id))
+    .flatMap((scenario) => scenario.rules.map((rule) => rule.id)),
 });
 
 const listViewsEvent = (): ViewsListEvent => ({
@@ -128,8 +126,8 @@ const setLoadedScenarios = (scenarios: LoadedScenario[]) => {
   loadedScenarios = scenarios;
 };
 
-const setActiveScenarioId = (id: string | null) => {
-  activeScenarioId = id;
+const setActiveScenarioIds = (ids: string[]) => {
+  activeScenarioIds = ids;
 };
 
 const setLoadedViews = (views: LoadedView[]) => {
@@ -146,15 +144,16 @@ const updateConfig = (patch: Partial<AproxyConfig>) => {
 const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
   Effect.gen(function* (_) {
     if (!proxyEnabled) return null;
-    const activeScenario = loadedScenarios.find((scenario) => scenario.id === activeScenarioId);
-    const rules = activeScenario?.rules ?? [];
-    for (const rule of rules) {
-      const result = yield* _(
-        Effect.tryPromise(() => Promise.resolve(rule.handle(context))).pipe(
-          Effect.mapError((cause) => new ProxyError({ cause }))
-        )
-      );
-      if (result) return result;
+    const activeScenarios = loadedScenarios.filter((scenario) => activeScenarioIds.includes(scenario.id));
+    for (const scenario of activeScenarios) {
+      for (const rule of scenario.rules) {
+        const result = yield* _(
+          Effect.tryPromise(() => Promise.resolve(rule.handle(context))).pipe(
+            Effect.mapError((cause) => new ProxyError({ cause }))
+          )
+        );
+        if (result) return result;
+      }
     }
     return null;
   });
@@ -171,7 +170,7 @@ const main = Effect.gen(function* (_) {
   // Initialize the CA for MITM SSL interception
   const ca: CaCert = yield* _(ensureCa());
 
-  const loadScenariosEffect = loadScenarios(scenariosDir, setLoadedScenarios, setActiveScenarioId);
+  const loadScenariosEffect = loadScenarios(scenariosDir, setLoadedScenarios, setActiveScenarioIds);
   const loadViewsEffect = loadViews(viewsDir, setLoadedViews);
   const loadAllRules = Effect.all([loadScenariosEffect, loadViewsEffect], { concurrency: "unbounded" }).pipe(Effect.asVoid);
   const routes = createRoutes({
@@ -182,8 +181,8 @@ const main = Effect.gen(function* (_) {
     viewsDir,
     handleProxy,
     createSse: (signal) => createSse(eventBus, listRulesEvent, listViewsEvent, signal),
-    getActiveScenarioId: () => activeScenarioId,
-    setActiveScenarioId,
+    getActiveScenarioIds: () => activeScenarioIds,
+    setActiveScenarioIds,
     getScenarios: () => loadedScenarios.map(({ id, name, description, rules }) => ({
       id, name, description,
       rules: rules.map(({ id, name, description }) => ({ id, name, description })),

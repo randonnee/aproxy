@@ -4,15 +4,15 @@ import * as api from "../../lib/api";
 
 export function ScenarioList() {
   const scenarios = useAppStore((s) => s.scenarios);
-  const activeScenarioId = useAppStore((s) => s.activeScenarioId);
+  const activeScenarioIds = useAppStore((s) => s.activeScenarioIds);
   const setScenarios = useAppStore((s) => s.setScenarios);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSetActive = async (id: string | null) => {
+  const handleToggle = async (id: string | null) => {
     try {
-      const data = await api.setActiveScenario(id);
-      setScenarios(data.scenarios, data.activeScenarioId);
+      const data = await api.toggleScenario(id);
+      setScenarios(data.scenarios, data.activeScenarioIds);
     } catch {
       // ignore
     }
@@ -25,7 +25,7 @@ export function ScenarioList() {
       const content = await file.text();
       await api.importScenarioFile(file.name, content);
       const data = await api.getScenarios();
-      setScenarios(data.scenarios, data.activeScenarioId);
+      setScenarios(data.scenarios, data.activeScenarioIds);
     } catch {
       // ignore
     }
@@ -35,7 +35,7 @@ export function ScenarioList() {
   return (
     <div className="sidebar-section">
       <div className="sidebar-title">
-        <span>Scenarios</span>
+        <span>Proxy Scenarios</span>
         <div className="sidebar-title-actions">
           <button
             className="sidebar-icon-btn"
@@ -61,24 +61,23 @@ export function ScenarioList() {
         ) : (
           <>
             <div
-              className={`scenario-item${activeScenarioId === null ? " active" : ""}`}
-              onClick={() => handleSetActive(null)}
+              className={`scenario-item${activeScenarioIds.length === 0 ? " active" : ""}`}
+              onClick={() => handleToggle(null)}
             >
-              <div className="dot" />
               <span>None (passthrough)</span>
             </div>
 
             {scenarios.map((s) => (
               <div key={s.id}>
                 <div
-                  className={`scenario-item${s.id === activeScenarioId ? " active" : ""}`}
-                  onClick={() => handleSetActive(s.id)}
+                  className={`scenario-item${activeScenarioIds.includes(s.id) ? " active" : ""}`}
+                  onClick={() => handleToggle(s.id)}
                 >
-                  <div className="dot" />
+                  <Checkbox checked={activeScenarioIds.includes(s.id)} />
                   <span>{s.name || s.id}</span>
                   {s.description && <InfoTip text={s.description} />}
                 </div>
-                {s.id === activeScenarioId && s.rules.length > 1 && (
+                {activeScenarioIds.includes(s.id) && s.rules.length > 1 && (
                   <div className="rule-list">
                     {s.rules.map((r) => (
                       <div key={r.id} className="rule-item">
@@ -94,6 +93,17 @@ export function ScenarioList() {
         )}
       </div>
     </div>
+  );
+}
+
+function Checkbox({ checked }: { checked: boolean }) {
+  return (
+    <svg className="scenario-checkbox" width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="0.5" y="0.5" width="13" height="13" rx="2.5" stroke="currentColor" strokeWidth="1" fill={checked ? "var(--accent)" : "none"} />
+      {checked && (
+        <path d="M3.5 7.5L5.5 9.5L10.5 4.5" stroke="var(--bg)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
   );
 }
 

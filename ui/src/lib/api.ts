@@ -41,16 +41,16 @@ export async function getPreferredHost(): Promise<string> {
 
 export async function getScenarios(): Promise<{
   scenarios: Scenario[];
-  activeScenarioId: string | null;
+  activeScenarioIds: string[];
 }> {
   return fetchJson("/scenarios");
 }
 
-export async function setActiveScenario(
+export async function toggleScenario(
   scenarioId: string | null
 ): Promise<{
   scenarios: Scenario[];
-  activeScenarioId: string | null;
+  activeScenarioIds: string[];
 }> {
   return fetchJson("/scenarios/active", {
     method: "PUT",

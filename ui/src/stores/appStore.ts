@@ -56,8 +56,8 @@ interface AppState {
 
   // Scenarios
   scenarios: Scenario[];
-  activeScenarioId: string | null;
-  setScenarios: (scenarios: Scenario[], activeId: string | null) => void;
+  activeScenarioIds: string[];
+  setScenarios: (scenarios: Scenario[], activeIds: string[]) => void;
 
   // Views
   views: ViewDef[];
@@ -187,9 +187,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Scenarios
   scenarios: [],
-  activeScenarioId: null,
-  setScenarios: (scenarios, activeId) =>
-    set({ scenarios, activeScenarioId: activeId }),
+  activeScenarioIds: [],
+  setScenarios: (scenarios, activeIds) =>
+    set({ scenarios, activeScenarioIds: activeIds }),
 
   // Views
   views: [],

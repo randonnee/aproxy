@@ -81,8 +81,8 @@ export function createRoutes(
     handleProxy: (req: Request) => Effect.Effect<Response, unknown>;
     createSse: (signal: AbortSignal) => ReadableStream<string>;
     getScenarios: () => Array<{ id: string; name: string; description?: string; rules: Array<{ id: string; name?: string; description?: string }> }>;
-    getActiveScenarioId: () => string | null;
-    setActiveScenarioId: (id: string | null) => void;
+    getActiveScenarioIds: () => string[];
+    setActiveScenarioIds: (ids: string[]) => void;
     getViews: () => Array<{ id: string; name: string; description?: string; filter: string }>;
     getConfig: () => AproxyConfig;
     updateConfig: (patch: Partial<AproxyConfig>) => void;
@@ -166,20 +166,31 @@ export function createRoutes(
       if (isControlRequest && url?.pathname === "/scenarios" && req.method === "GET") {
         return Response.json({
           scenarios: deps.getScenarios(),
-          activeScenarioId: deps.getActiveScenarioId()
+          activeScenarioIds: deps.getActiveScenarioIds()
         });
       }
 
       if (isControlRequest && url?.pathname === "/scenarios/active" && req.method === "PUT") {
         const body = yield* _(
-          parseJsonBody<{ scenarioId: string | null }>(req).pipe(
+          parseJsonBody<{ scenarioId: string }>(req).pipe(
             Effect.mapError((cause) => new RequestError({ cause }))
           )
         );
-        deps.setActiveScenarioId(body.scenarioId ?? null);
+        const current = deps.getActiveScenarioIds();
+        const id = body.scenarioId;
+        if (id) {
+          // Toggle: add if missing, remove if present
+          const next = current.includes(id)
+            ? current.filter((s) => s !== id)
+            : [...current, id];
+          deps.setActiveScenarioIds(next);
+        } else {
+          // Clear all
+          deps.setActiveScenarioIds([]);
+        }
         return Response.json({
           scenarios: deps.getScenarios(),
-          activeScenarioId: deps.getActiveScenarioId()
+          activeScenarioIds: deps.getActiveScenarioIds()
         });
       }
 

@@ -34,7 +34,7 @@ function importModules(dir: string) {
 export function loadScenarios(
   scenariosDir: string,
   setLoadedScenarios: (scenarios: LoadedScenario[]) => void,
-  setActiveScenarioId: (id: string | null) => void
+  setActiveScenarioIds: (ids: string[]) => void
 ) {
   return Effect.gen(function* (_) {
     const modules = yield* _(importModules(scenariosDir));
@@ -53,7 +53,7 @@ export function loadScenarios(
     Effect.catchAll(() =>
       Effect.sync(() => {
         setLoadedScenarios([]);
-        setActiveScenarioId(null);
+        setActiveScenarioIds([]);
       })
     )
   );

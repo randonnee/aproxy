@@ -21,7 +21,7 @@ export function useInitialData() {
       .catch(() => {});
     api
       .getScenarios()
-      .then((d) => setScenarios(d.scenarios, d.activeScenarioId))
+      .then((d) => setScenarios(d.scenarios, d.activeScenarioIds))
       .catch(() => {});
     api
       .getViews()

@@ -36,7 +36,7 @@ export function useSSE() {
             api.getScenarios().then((data) => {
               useAppStore
                 .getState()
-                .setScenarios(data.scenarios, data.activeScenarioId);
+                .setScenarios(data.scenarios, data.activeScenarioIds);
             });
             break;
           case "views_list":
