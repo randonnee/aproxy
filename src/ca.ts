@@ -106,17 +106,17 @@ export function ensureCa(): Effect.Effect<CaCert, CommandError> {
       console.log(`[ca] Trust it: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${CA_CERT_PATH}`);
     }
 
-    const keyPem = yield* _(
-      Effect.tryPromise({
-        try: () => Bun.file(CA_KEY_PATH).text(),
-        catch: (err) => new CommandError({ command: "read", args: [CA_KEY_PATH], stderr: String(err), exitCode: 1 }),
-      })
-    );
-    const certPem = yield* _(
-      Effect.tryPromise({
-        try: () => Bun.file(CA_CERT_PATH).text(),
-        catch: (err) => new CommandError({ command: "read", args: [CA_CERT_PATH], stderr: String(err), exitCode: 1 }),
-      })
+    const [keyPem, certPem] = yield* _(
+      Effect.all([
+        Effect.tryPromise({
+          try: () => Bun.file(CA_KEY_PATH).text(),
+          catch: (err) => new CommandError({ command: "read", args: [CA_KEY_PATH], stderr: String(err), exitCode: 1 }),
+        }),
+        Effect.tryPromise({
+          try: () => Bun.file(CA_CERT_PATH).text(),
+          catch: (err) => new CommandError({ command: "read", args: [CA_CERT_PATH], stderr: String(err), exitCode: 1 }),
+        }),
+      ], { concurrency: "unbounded" })
     );
 
     return { keyPem, certPem, keyPath: CA_KEY_PATH, certPath: CA_CERT_PATH };

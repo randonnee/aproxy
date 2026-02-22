@@ -9,7 +9,6 @@ export default {
   build: {
     bun: {
       entrypoint: "src/bun/index.ts",
-      external: ["effect"],
     },
     copy: {
       "ui/dist/index.html": "views/mainview/index.html",

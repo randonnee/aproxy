@@ -182,13 +182,9 @@ const main = Effect.gen(function* (_) {
   });
 
   yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
-  yield* _(loadAllRules);
 
-  // Sync initial proxy state
-  yield* _(readHostProxySettings().pipe(
-    Effect.tap((result) => Effect.sync(() => { proxyEnabled = result.enabled; })),
-    Effect.catchAll(() => Effect.succeed(undefined))
-  ));
+  // Load rules and set up file watchers (non-blocking for proxy operation)
+  yield* _(loadAllRules);
 
   const emitReload = () => {
     void Effect.runPromise(
@@ -204,6 +200,7 @@ const main = Effect.gen(function* (_) {
   console.log(`Proxy listening on :${proxyPort} (MITM enabled)`);
 });
 
+/** Start the proxy server (CA + TCP listener + rules + watchers). */
 export function startProxy() {
   return Effect.runPromise(main);
 }
