@@ -16,6 +16,8 @@ export default {
       "examples/scenarios": "examples/scenarios",
       "examples/views": "examples/views",
     },
+    // Ignore Vite output in watch mode — HMR handles view rebuilds separately
+    watchIgnore: ["ui/dist/**"],
     mac: {
       bundleCEF: false,
     },

@@ -21,7 +21,7 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 - `src/tunnel.ts` — CONNECT tunnel handler, bidirectional TCP piping via `Bun.connect` (blind fallback, no events emitted)
 - `src/mitm.ts` — MITM tunnel handler, TLS termination via ephemeral `Bun.listen` TLS server, decrypted HTTP parsing, proxy pipeline reuse
 - `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions, in-memory caching
-- `src/server.ts` — route definitions (control API + proxy dispatch), `createServer` wraps `createTcpProxy`
+- `src/server.ts` — route definitions (control API + proxy dispatch), CORS headers for cross-origin desktop requests, `createServer` wraps `createTcpProxy`
 - `src/proxy.ts` — HTTP proxy forwarding logic with rule evaluation
 - `src/http.ts` — SSE stream creation, hop-by-hop header stripping, header utilities
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config (`networksetup`), CA trust on host. All functions return `Effect<T, CommandError>`
@@ -40,9 +40,9 @@ The web UI is a React + TypeScript app built with Vite, served from `ui/dist/` b
 - `ui/src/App.tsx` — root component, layout shell
 - `ui/src/main.tsx` — React entry point
 - `ui/src/stores/appStore.ts` — Zustand store for app state (scenarios, views, requests, etc.)
-- `ui/src/hooks/useSSE.ts` — SSE connection hook, processes server events
+- `ui/src/hooks/useSSE.ts` — SSE connection hook, processes server events, uses `API_BASE` for cross-origin support
 - `ui/src/hooks/useInitialData.ts` — fetches initial data on mount (proxy status, scenarios, views, simulators, CA trust, theme)
-- `ui/src/lib/api.ts` — API client functions for all backend endpoints
+- `ui/src/lib/api.ts` — API client functions for all backend endpoints, exports `API_BASE` (set via `VITE_API_BASE` env var at build time)
 - `ui/src/lib/types.ts` — TypeScript types for UI models
 - `ui/src/lib/helpers.ts` — utility functions
 - `ui/src/styles/global.css` — all styles (CSS variables, dark/light themes, layout, components)
@@ -366,11 +366,27 @@ This fix is in the shared proxy pipeline, so it applies to both HTTP and MITM-in
 
 The project uses Electrobun (not Electron) for the desktop build. Electrobun uses Bun as its runtime, so all existing networking code runs unchanged.
 
-- `electrobun.config.ts` — build config
-- `src/electrobun/index.ts` — desktop entry point, sets resource env vars, creates BrowserWindow loading `http://127.0.0.1:8080`
-- `scripts/build-ui.ts` — preBuild hook (builds React UI)
-- Dev: `bunx electrobun dev`
-- Production: `bunx electrobun build --env=stable` (outputs DMG to `artifacts/`)
+- `electrobun.config.ts` — build config, copies built UI into `views/mainview/` in the app bundle
+- `src/electrobun/index.ts` — desktop entry point, loads the UI via `views://mainview/index.html` (Electrobun's built-in protocol for bundled views), with HMR dev server detection in dev mode
+- `scripts/build-ui.ts` — preBuild hook, builds the React UI with `VITE_API_BASE=http://127.0.0.1:8080` so API calls use absolute URLs (required because the UI is loaded via `views://` not from the backend server)
+- Dev: `bun run desktop` (runs `electrobun dev`)
+- Production: `bun run desktop:build` (runs `electrobun build --env=stable`, outputs DMG to `artifacts/`)
+
+### Desktop UI loading
+
+In the desktop app, the UI is loaded from the app bundle via the `views://mainview/index.html` protocol instead of being served by the backend HTTP server. This means:
+
+1. The React UI is built with `VITE_API_BASE=http://127.0.0.1:8080` baked in, so all `fetch()` and `EventSource` calls use absolute URLs to reach the backend.
+2. The backend includes CORS headers (`Access-Control-Allow-Origin: *`) on all control request responses so cross-origin requests from the `views://` origin succeed.
+3. In dev mode, if the Vite dev server is running on port 3000, the desktop window loads from there for HMR support.
+
+### Standalone vs desktop UI serving
+
+| Mode | UI loaded from | API calls | CORS needed |
+|------|---------------|-----------|-------------|
+| **Standalone** (`bun run start`) | Backend serves `ui/dist/` at `/` | Relative URLs (`/events`, etc.) | No (same origin) |
+| **Desktop prod** | `views://mainview/index.html` | Absolute: `http://127.0.0.1:8080/...` | Yes |
+| **Desktop dev + HMR** | `http://localhost:3000` (Vite) | Vite proxy handles routing | No |
 
 ### Installing unsigned builds
 

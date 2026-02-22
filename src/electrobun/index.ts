@@ -1,13 +1,14 @@
-import { BrowserWindow, ApplicationMenu, Utils } from "electrobun/bun";
+import { BrowserWindow, ApplicationMenu, Updater, Utils } from "electrobun/bun";
 import { resolve } from "node:path";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT ?? 8080);
+const DEV_SERVER_PORT = 3000;
+const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
 // Resolve resource paths relative to the Electrobun app bundle.
 // The launcher always sets cwd to .app/Contents/MacOS/, so resolve("../Resources/")
 // works reliably in both dev and production builds (including ASAR extraction).
 const appBundleDir = resolve("../Resources/app");
-process.env.APROXY_UI_DIR = resolve(appBundleDir, "views", "mainview");
 process.env.APROXY_EXAMPLES_DIR = resolve(appBundleDir, "examples");
 
 // Dynamic import so env vars are set before server.ts resolves paths
@@ -16,11 +17,29 @@ const { startProxy, disableProxySync } = await import("../index");
 // Start the proxy server (TCP listener on :8080)
 await startProxy();
 
-// Create native window pointing to the control server.
-// The splash screen is embedded in index.html and dismissed by React after first paint.
+// Check if Vite dev server is running for HMR
+async function getMainViewUrl(): Promise<string> {
+  const channel = await Updater.localInfo.channel();
+  if (channel === "dev") {
+    try {
+      await fetch(DEV_SERVER_URL, { method: "HEAD" });
+      console.log(`HMR enabled: Using Vite dev server at ${DEV_SERVER_URL}`);
+      return DEV_SERVER_URL;
+    } catch {
+      console.log(
+        "Vite dev server not running. Run 'bun run --cwd ui dev' for HMR support."
+      );
+    }
+  }
+  return "views://mainview/index.html";
+}
+
+const url = await getMainViewUrl();
+
+// Create native window loading the bundled view (or HMR dev server in dev).
 const appWindow = new BrowserWindow({
   title: "Aproxy",
-  url: `http://127.0.0.1:${PROXY_PORT}`,
+  url,
   titleBarStyle: "hiddenInset",
   frame: {
     width: 1200,
@@ -64,4 +83,4 @@ appWindow.on("close", () => {
   Utils.quit();
 });
 
-console.log(`Aproxy desktop app started (proxy on :${PROXY_PORT})`);
+console.log(`[${(new Date()).toLocaleString()}]Aproxy desktop app started (proxy on :${PROXY_PORT})`);

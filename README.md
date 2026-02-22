@@ -33,7 +33,7 @@ The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handle
 - `src/tunnel.ts` — CONNECT tunnel handler (blind TCP pipe fallback via `Bun.connect`)
 - `src/mitm.ts` — MITM tunnel handler (TLS termination, decrypted HTTP parsing, proxy pipeline reuse)
 - `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions
-- `src/server.ts` — route definitions (control API + proxy dispatch)
+- `src/server.ts` — route definitions (control API + proxy dispatch), CORS headers for cross-origin desktop requests
 - `src/proxy.ts` — HTTP proxy forwarding with rule evaluation
 - `src/http.ts` — SSE stream creation, header utilities
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config, CA trust. All functions return `Effect<T, CommandError>`
@@ -47,17 +47,17 @@ The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handle
 
 ### Web UI (`ui/`)
 
-The web UI is a React + TypeScript app built with Vite, served from `ui/dist/` by the backend. Open `http://localhost:8080` in a browser to see proxied requests in real time.
+The web UI is a React + TypeScript app built with Vite. In standalone mode it is served from `ui/dist/` by the backend at `http://localhost:8080`. In the desktop app it is loaded via Electrobun's `views://` protocol with API calls routed to the backend via `VITE_API_BASE`.
 
-During development, run `npm run dev` in `ui/` for the Vite dev server on port 3000 with hot-reload. After changes, run `npm run build` in `ui/` to update the dist served by the backend.
+During development, run `bun run dev:ui` for the Vite dev server on port 3000 with hot-reload. After changes, run `bun run build:ui` to update the dist served by the backend.
 
 Key files:
 
 - `ui/src/App.tsx` — root component, layout shell
 - `ui/src/stores/appStore.ts` — Zustand store for app state
-- `ui/src/hooks/useSSE.ts` — SSE connection hook
+- `ui/src/hooks/useSSE.ts` — SSE connection hook, uses `API_BASE` for cross-origin support
 - `ui/src/hooks/useInitialData.ts` — fetches initial data on mount
-- `ui/src/lib/api.ts` — API client functions for all backend endpoints
+- `ui/src/lib/api.ts` — API client functions, exports `API_BASE` (set via `VITE_API_BASE` env var at build time)
 - `ui/src/styles/global.css` — all styles (CSS variables, dark/light themes)
 - `ui/src/components/Sidebar/` — sidebar sections (proxy toggle, scenarios, views, simulators, CA cert)
 - `ui/src/components/RequestTable/` — request list table with resizable columns
@@ -223,7 +223,7 @@ Endpoints:
 
 - `GET /ca/cert` — download the CA certificate PEM file
 - `GET /ca/status` — check if CA is initialized, get cert path and trust command
-- `POST /ca/trust` — trust the CA in the macOS system keychain (requires sudo, will prompt for password)
+- `POST /ca/trust` — trust the CA in the macOS login keychain (no admin required)
 - `GET /ca/trust/status` — check if the CA is already trusted on the host
 
 ### Examples
@@ -268,7 +268,7 @@ Check CA status:
 curl -s http://localhost:8080/ca/status | jq
 ```
 
-Trust the CA on macOS (will prompt for sudo password):
+Trust the CA on macOS (no admin required, uses login keychain):
 
 ```bash
 curl -s -X POST http://localhost:8080/ca/trust
@@ -341,6 +341,26 @@ Error types:
 - `RulesLoadError` — rule file loading errors
 
 All simulator, proxy, and CA operations in `src/simulators.ts` and `src/ca.ts` return Effect-TS effects with typed `CommandError` channels, ensuring errors propagate through the pipeline with full context.
+
+## Desktop app (Electrobun)
+
+The project uses [Electrobun](https://electrobun.dev) for the native macOS desktop build. Electrobun uses Bun as its runtime, so all existing networking code runs unchanged.
+
+```bash
+# Dev mode (with HMR if Vite dev server is running)
+bun run desktop
+
+# Production build (outputs DMG to artifacts/)
+bun run desktop:build
+```
+
+The desktop app loads the UI via `views://mainview/index.html` (Electrobun's built-in protocol for bundled views) instead of from the backend HTTP server. API calls use absolute URLs (`http://127.0.0.1:8080/...`) baked in at build time via `VITE_API_BASE`. The backend includes CORS headers on all control responses to support this cross-origin setup.
+
+The DMG/app is currently **unsigned**. After copying to `/Applications`, run:
+
+```bash
+xattr -cr /Applications/Aproxy.app
+```
 
 ## Notes
 

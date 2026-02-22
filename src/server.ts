@@ -9,9 +9,9 @@ import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
 import { createTcpProxy } from "./tcpProxy";
 
-// Resolve UI dist directory (built React app)
-// APROXY_UI_DIR: set by Electrobun entry to point at bundled UI files.
-// Standalone: resolve relative to source tree.
+// Resolve UI dist directory (built React app) for standalone mode.
+// In the Electrobun desktop build, the view is loaded via views:// protocol
+// and the UI is not served by the backend.
 const uiDistDir = process.env.APROXY_UI_DIR ?? join(import.meta.dir, "..", "ui", "dist");
 const uiIndexPath = join(uiDistDir, "index.html");
 const uiFallbackPath = join(import.meta.dir, "ui.html");
@@ -19,6 +19,22 @@ const uiFallbackPath = join(import.meta.dir, "ui.html");
 // Resolve bundled examples directory
 // APROXY_EXAMPLES_DIR: set by Electrobun entry to point at bundled examples.
 const examplesDir = process.env.APROXY_EXAMPLES_DIR ?? join(import.meta.dir, "..", "examples");
+
+// CORS headers for cross-origin requests (needed when the desktop app loads
+// the UI via views:// protocol and API calls go to http://127.0.0.1:8080).
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+/** Append CORS headers to an existing Response */
+function withCors(res: Response): Response {
+  for (const [k, v] of Object.entries(CORS_HEADERS)) {
+    res.headers.set(k, v);
+  }
+  return res;
+}
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -107,8 +123,9 @@ export function createRoutes(
   }
 ) {
   const controlHosts = listLocalHosts();
-  return (req: Request) =>
-    Effect.gen(function* (_) {
+  return (req: Request) => {
+    let _isControlRequest = false;
+    return Effect.gen(function* (_) {
       const hostHeader = req.headers.get("host") ?? "";
       const hostOnly = hostHeader.replace(/^\[/, "").split(":")[0].replace(/\]$/, "");
       const isControlHost = controlHosts.has(hostOnly);
@@ -128,6 +145,7 @@ export function createRoutes(
       })();
       const urlHost = url?.hostname ?? "";
       const isControlRequest = isControlHost && controlHosts.has(urlHost || hostOnly);
+      _isControlRequest = isControlRequest;
 
       yield* _(
         Effect.sync(() =>
@@ -136,6 +154,11 @@ export function createRoutes(
           )
         )
       );
+
+      // Handle CORS preflight requests for cross-origin API access
+      if (isControlRequest && req.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
+      }
 
       if (isControlRequest && url?.pathname === "/events" && req.method === "GET") {
         const stream = deps.createSse(req.signal);
@@ -442,15 +465,19 @@ export function createRoutes(
       }
 
       return yield* _(deps.handleProxy(req));
-    }).pipe(Effect.catchAll((err) => Effect.sync(() => {
-      const message = err instanceof CommandError
-        ? err.message
-        : err instanceof RequestError
-          ? String((err as any).cause ?? err)
-          : String(err);
-      console.error(`[route error] ${message}`);
-      return Response.json({ error: message }, { status: 400 });
-    })));
+    }).pipe(
+      Effect.map((res) => _isControlRequest ? withCors(res) : res),
+      Effect.catchAll((err) => Effect.sync(() => {
+        const message = err instanceof CommandError
+          ? err.message
+          : err instanceof RequestError
+            ? String((err as any).cause ?? err)
+            : String(err);
+        console.error(`[route error] ${message}`);
+        return withCors(Response.json({ error: message }, { status: 400 }));
+      })),
+    );
+  };
 }
 
 export function createSse(

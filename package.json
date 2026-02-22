@@ -9,8 +9,8 @@
     "build:ui": "bun run --cwd ui build",
     "start": "bun src/index.ts",
     "go": "bun run --cwd ui build && bun src/index.ts",
-    "desktop": "bun run build:ui && electrobun build && electrobun dev",
-    "desktop:build": "bun run build:ui && electrobun build"
+    "desktop": "electrobun dev",
+    "desktop:build": "electrobun build --env=stable"
   },
   "devDependencies": {
     "@types/bun": "latest",

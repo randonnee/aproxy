@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "../stores/appStore";
 import * as api from "../lib/api";
+import { API_BASE } from "../lib/api";
 import type { SSEEvent } from "../lib/types";
 
 export function useSSE() {
@@ -13,7 +14,7 @@ export function useSSE() {
   const setSimulators = useAppStore((s) => s.setSimulators);
 
   useEffect(() => {
-    const source = new EventSource("/events");
+    const source = new EventSource(`${API_BASE}/events`);
     sourceRef.current = source;
 
     source.onopen = () => setConnected(true);
