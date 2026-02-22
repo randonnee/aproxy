@@ -61,7 +61,7 @@ export function ViewList() {
             onClick={() => fileInputRef.current?.click()}
             title="Import view"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M8 3v10M3 8h10" />
             </svg>
           </button>
@@ -85,7 +85,7 @@ export function ViewList() {
             >
               <div className="dot" />
               <span>All requests</span>
-              {defaultViewId === null && activeViewId === null && (
+              {defaultViewId === null && (
                 <span className="view-default-badge">default</span>
               )}
               {activeViewId === null && defaultViewId !== null && (
@@ -109,7 +109,6 @@ export function ViewList() {
                   >
                     <div className="dot" />
                     <span>{v.name || v.id}</span>
-                    {v.description && <InfoTip text={v.description} />}
                     {isDefault && (
                       <span className="view-default-badge">default</span>
                     )}
@@ -121,6 +120,7 @@ export function ViewList() {
                         set default
                       </span>
                     )}
+                    {v.description && <InfoTip text={v.description} />}
                   </div>
                 </div>
               );
