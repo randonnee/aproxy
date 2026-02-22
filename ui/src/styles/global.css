@@ -764,12 +764,6 @@ html.desktop-app .topbar {
   background: var(--purple-subtle);
 }
 
-.method-chip.active .method-label.method-CONNECT {
-  color: var(--ink-muted);
-  border-color: var(--border-strong);
-  background: var(--surface);
-}
-
 /* ════════════════════════════════════════════
    Buttons
    ════════════════════════════════════════════ */
@@ -953,10 +947,6 @@ button.danger:hover {
 
 .method-PATCH {
   color: var(--purple);
-}
-
-.method-CONNECT {
-  color: var(--ink-faint);
 }
 
 /* Status colors */

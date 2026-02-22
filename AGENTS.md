@@ -18,7 +18,7 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 
 - `src/index.ts` — entry point, wires dependencies together
 - `src/tcpProxy.ts` — raw TCP listener (`Bun.listen`), HTTP request parsing, CONNECT detection and dispatch
-- `src/tunnel.ts` — CONNECT tunnel handler, bidirectional TCP piping via `Bun.connect` (blind fallback)
+- `src/tunnel.ts` — CONNECT tunnel handler, bidirectional TCP piping via `Bun.connect` (blind fallback, no events emitted)
 - `src/mitm.ts` — MITM tunnel handler, TLS termination via ephemeral `Bun.listen` TLS server, decrypted HTTP parsing, proxy pipeline reuse
 - `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions, in-memory caching
 - `src/server.ts` — route definitions (control API + proxy dispatch), `createServer` wraps `createTcpProxy`
@@ -89,9 +89,9 @@ Events are sent as unnamed SSE messages with a JSON `data:` payload. The `type` 
 
 Current event types:
 
-- `request` — HTTP or CONNECT request received
-- `response` — upstream response or tunnel established
-- `error` — proxy or tunnel error
+- `request` — HTTP request received (HTTPS requests appear after MITM decryption)
+- `response` — upstream response
+- `error` — proxy error
 - `rules_list` — current rules and active rule IDs
 - `simulators_list` — available iOS simulators
 - `simulator_configured` — simulator cert installed

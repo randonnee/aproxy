@@ -1,5 +1,4 @@
 import type { Socket } from "bun";
-import type { ProxyEvent } from "./models";
 
 /**
  * Handles HTTP CONNECT tunneling.
@@ -21,28 +20,13 @@ import type { ProxyEvent } from "./models";
  * @param host - Target hostname
  * @param port - Target port
  * @param pendingData - Any data received from the client after the CONNECT headers but before the tunnel is established
- * @param emitEvent - Callback to emit proxy events for the UI
  */
 export async function handleConnect(
   clientSocket: Socket<any>,
   host: string,
   port: number,
-  pendingData: Buffer[],
-  emitEvent: (event: ProxyEvent) => void
+  pendingData: Buffer[]
 ): Promise<void> {
-  const tunnelId = crypto.randomUUID();
-  const startedAt = Date.now();
-
-  // Emit a request event so the tunnel shows up in the UI
-  emitEvent({
-    type: "request",
-    id: tunnelId,
-    method: "CONNECT",
-    url: `${host}:${port}`,
-    headers: {},
-    timestamp: startedAt
-  });
-
   try {
     // Connect to the upstream target
     await Bun.connect<{ peer: Socket<any> }>({
@@ -79,36 +63,13 @@ export async function handleConnect(
           console.error(`[tunnel] connect failed for ${host}:${port}:`, error?.message ?? error);
           clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
           clientSocket.end();
-
-          emitEvent({
-            type: "error",
-            id: tunnelId,
-            message: `CONNECT failed: ${error?.message ?? "unknown error"}`,
-            timestamp: Date.now()
-          });
         }
       }
     });
 
-    // Emit a response event
-    emitEvent({
-      type: "response",
-      id: tunnelId,
-      status: 200,
-      headers: {},
-      durationMs: Date.now() - startedAt,
-      timestamp: Date.now()
-    });
   } catch (err: any) {
     console.error(`[tunnel] failed to open connection to ${host}:${port}:`, err?.message ?? err);
     clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
     clientSocket.end();
-
-    emitEvent({
-      type: "error",
-      id: tunnelId,
-      message: `CONNECT failed: ${err?.message ?? "unknown error"}`,
-      timestamp: Date.now()
-    });
   }
 }

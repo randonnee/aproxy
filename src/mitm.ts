@@ -92,18 +92,6 @@ export async function handleMitm(
   ca: CaCert,
   fetchHandler: FetchHandler
 ): Promise<void> {
-  const tunnelId = crypto.randomUUID();
-  const startedAt = Date.now();
-
-  emitEvent({
-    type: "request",
-    id: tunnelId,
-    method: "CONNECT",
-    url: `${host}:${port}`,
-    headers: {},
-    timestamp: startedAt,
-  });
-
   try {
     // Generate a per-host certificate
     const hostCert = await getHostCert(host, ca);
@@ -240,36 +228,14 @@ export async function handleMitm(
           clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
           clientSocket.end();
           tlsListener.stop();
-
-          emitEvent({
-            type: "error",
-            id: tunnelId,
-            message: `MITM bridge failed: ${error?.message ?? "unknown error"}`,
-            timestamp: Date.now(),
-          });
         },
       },
     });
 
-    emitEvent({
-      type: "response",
-      id: tunnelId,
-      status: 200,
-      headers: {},
-      durationMs: Date.now() - startedAt,
-      timestamp: Date.now(),
-    });
   } catch (err: any) {
     console.error(`[mitm] failed to set up MITM for ${host}:${port}:`, err?.message ?? err);
     clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
     clientSocket.end();
-
-    emitEvent({
-      type: "error",
-      id: tunnelId,
-      message: `MITM setup failed: ${err?.message ?? "unknown error"}`,
-      timestamp: Date.now(),
-    });
   }
 }
 

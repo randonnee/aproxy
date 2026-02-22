@@ -139,7 +139,7 @@ export function createTcpProxy(opts: {
           if (ca) {
             handleMitm(socket, host, targetPort, pending, emitEvent, ca, fetchHandler);
           } else {
-            handleConnect(socket, host, targetPort, pending, emitEvent);
+            handleConnect(socket, host, targetPort, pending);
           }
         } else {
           // Check if we need to wait for body bytes
