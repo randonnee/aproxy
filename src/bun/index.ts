@@ -11,7 +11,7 @@ process.env.APROXY_UI_DIR = resolve(resourcesDir, "views", "mainview");
 process.env.APROXY_EXAMPLES_DIR = resolve(resourcesDir, "examples");
 
 // Dynamic import so env vars are set before server.ts resolves paths
-const { startProxy } = await import("../index");
+const { startProxy, disableProxySync } = await import("../index");
 
 // Start the proxy server (TCP listener on :8080)
 await startProxy();
@@ -50,6 +50,7 @@ ApplicationMenu.setApplicationMenu([
 ]);
 
 mainWindow.on("close", () => {
+  disableProxySync();
   Utils.quit();
 });
 

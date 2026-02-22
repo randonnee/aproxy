@@ -234,6 +234,90 @@ Key patterns:
 - Quick manual smoke test: `curl -x http://localhost:8080 https://httpbin.org/get`
 - HTTPS MITM smoke test: `curl --cacert ~/.aproxy/ca.pem -x http://localhost:8080 https://httpbin.org/get`
 
+## Desktop app (Electrobun)
+
+The project uses Electrobun (not Electron) for the desktop build. Electrobun uses Bun as its runtime, so all existing networking code runs unchanged.
+
+- `electrobun.config.ts` — build config
+- `src/bun/index.ts` — desktop entry point, sets resource env vars, creates BrowserWindow loading `http://127.0.0.1:8080`
+- `scripts/build-ui.ts` — preBuild hook (builds React UI)
+- Dev: `bunx electrobun dev`
+- Production: `bunx electrobun build --env=stable` (outputs DMG to `artifacts/`)
+
+### Installing unsigned builds
+
+The DMG/app is currently **unsigned**. macOS Gatekeeper will show "damaged" or "unidentified developer" errors. To work around this, after mounting the DMG and copying the app:
+
+```bash
+xattr -cr /Applications/Aproxy.app
+```
+
+### Next step: code signing and notarization
+
+To eliminate the Gatekeeper warning, enable code signing and notarization. This requires an Apple Developer Program membership ($99/yr).
+
+**1. Get a signing certificate:**
+- Enroll at https://developer.apple.com/programs/
+- In the Developer portal (Certificates, IDs & Profiles), create a "Developer ID Application" certificate
+- Or in Xcode: Settings > Accounts > Manage Certificates > "+" > Developer ID Application
+- Verify it's installed: `security find-identity -v -p codesigning` should show `"Developer ID Application: Your Name (TEAMID)"`
+
+**2. Update `electrobun.config.ts`:**
+```typescript
+mac: {
+  bundleCEF: false,
+  codesign: true,
+  notarize: true,
+},
+```
+
+**3. Create an app-specific password:**
+- Go to https://appleid.apple.com/account/manage
+- Sign In & Security > App-Specific Passwords > Generate
+
+**4. Add GitHub Actions secrets** (Settings > Secrets and variables > Actions):
+
+| Secret | Value |
+|---|---|
+| `CERTIFICATE_P12_BASE64` | `.p12` export of "Developer ID Application" cert, base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
+| `CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` |
+| `ELECTROBUN_DEVELOPER_ID` | Full identity string, e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `ELECTROBUN_APPLEID` | Apple ID email |
+| `ELECTROBUN_APPLEIDPASS` | App-specific password (from step 3) |
+| `ELECTROBUN_TEAMID` | Apple Developer Team ID |
+
+**5. Update `.github/workflows/build.yml`** to import the certificate into a temporary keychain and pass env vars:
+```yaml
+- name: Import signing certificate
+  env:
+    CERTIFICATE_P12_BASE64: ${{ secrets.CERTIFICATE_P12_BASE64 }}
+    CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+  run: |
+    KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+    KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+    echo "$CERTIFICATE_P12_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
+    security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security import $RUNNER_TEMP/certificate.p12 \
+      -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+    security set-key-partition-list -S apple-tool:,apple:,codesign: \
+      -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+- name: Build desktop app
+  run: bunx electrobun build --env=stable
+  env:
+    ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+    ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+    ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+    ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+
+- name: Clean up keychain
+  if: always()
+  run: security delete-keychain $RUNNER_TEMP/signing.keychain-db 2>/dev/null || true
+```
+
 ## Pull request / commit guidance
 
 - Do not create git commits unless the user asks.

@@ -35,6 +35,73 @@ const aproxyDir = join(homedir(), ".aproxy");
 const scenariosDir = join(aproxyDir, "scenarios");
 const viewsDir = join(aproxyDir, "views");
 
+/**
+ * Synchronously disable the host proxy settings.
+ * Used during process shutdown when we cannot rely on async Effect execution.
+ */
+function disableProxySync(): void {
+  if (!proxyEnabled) return;
+  try {
+    const result = Bun.spawnSync(["route", "-n", "get", "default"], { stdout: "pipe", stderr: "pipe" });
+    const routeOutput = new TextDecoder().decode(result.stdout);
+    const ifaceMatch = routeOutput.match(/interface:\s*(\S+)/);
+    if (!ifaceMatch) return;
+
+    const portsOutput = Bun.spawnSync(["networksetup", "-listallhardwareports"], { stdout: "pipe", stderr: "pipe" });
+    const portsText = new TextDecoder().decode(portsOutput.stdout);
+    const blocks = portsText.split(/\n\n/);
+    let service: string | null = null;
+    for (const block of blocks) {
+      const deviceMatch = block.match(/Device:\s*(\S+)/);
+      const nameMatch = block.match(/Hardware Port:\s*(.+)/);
+      if (deviceMatch && nameMatch && deviceMatch[1] === ifaceMatch[1]) {
+        service = nameMatch[1].trim();
+        break;
+      }
+    }
+    if (!service) return;
+
+    Bun.spawnSync(["networksetup", "-setwebproxystate", service, "off"], { stdout: "pipe", stderr: "pipe" });
+    Bun.spawnSync(["networksetup", "-setsecurewebproxystate", service, "off"], { stdout: "pipe", stderr: "pipe" });
+    proxyEnabled = false;
+    console.log("Proxy settings cleaned up on exit");
+  } catch {
+    // Best effort — nothing we can do if cleanup fails during shutdown
+  }
+}
+
+/** Install process signal handlers to clean up proxy settings on exit. */
+function installShutdownHandlers(): void {
+  const onSignal = (signal: string) => {
+    console.log(`\nReceived ${signal}, cleaning up...`);
+    disableProxySync();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => onSignal("SIGINT"));
+  process.on("SIGTERM", () => onSignal("SIGTERM"));
+  process.on("SIGHUP", () => onSignal("SIGHUP"));
+}
+
+/**
+ * On startup, check if the system proxy is still pointing at our port from a
+ * previous session that crashed or was killed. If so, disable it.
+ */
+function cleanupStaleProxy(): Effect.Effect<void, never> {
+  return readHostProxySettings().pipe(
+    Effect.flatMap((result) => {
+      if (!result.enabled) return Effect.void;
+      const port = result.settings["HTTPPort"] || result.settings["HTTPSPort"];
+      if (port && Number(port) === proxyPort) {
+        console.log("Detected stale proxy settings from a previous session, disabling...");
+        return disableHostProxy().pipe(Effect.asVoid);
+      }
+      return Effect.void;
+    }),
+    Effect.catchAll(() => Effect.void),
+  );
+}
+
 const listRulesEvent = (): RulesListEvent => ({
   type: "rules_list",
   rules: loadedScenarios.flatMap((scenario) =>
@@ -95,6 +162,12 @@ const applyRules = (context: { id: string; url: string; method: string; headers:
 const handleProxy = (req: Request) => handleHttpProxy(req, (event) => eventBus.emit(event), applyRules);
 
 const main = Effect.gen(function* (_) {
+  installShutdownHandlers();
+
+  // Clean up stale proxy settings from a previous crash — if the system proxy
+  // is pointing at our host:port but we just started, it's leftover config.
+  yield* _(cleanupStaleProxy());
+
   // Initialize the CA for MITM SSL interception
   const ca: CaCert = yield* _(ensureCa());
 
@@ -204,6 +277,9 @@ const main = Effect.gen(function* (_) {
 export function startProxy() {
   return Effect.runPromise(main);
 }
+
+/** Exported for use by Electrobun entry to clean up on window close. */
+export { disableProxySync };
 
 if (import.meta.main) {
   await Effect.runPromise(main);
