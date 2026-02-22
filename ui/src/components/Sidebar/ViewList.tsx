@@ -2,6 +2,19 @@ import { useRef } from "react";
 import { useAppStore } from "../../stores/appStore";
 import * as api from "../../lib/api";
 
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="info-tip">
+      <span className="info-btn">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm1.5 8h-3v-1h1V7.5h-1v-1h2V11h1v1Z" />
+        </svg>
+      </span>
+      <span className="info-tip-text">{text}</span>
+    </span>
+  );
+}
+
 export function ViewList() {
   const views = useAppStore((s) => s.views);
   const activeViewId = useAppStore((s) => s.activeViewId);
@@ -93,10 +106,10 @@ export function ViewList() {
                   <div
                     className={`scenario-item${isActive ? " active" : ""}`}
                     onClick={() => setActiveView(v.id)}
-                    data-tooltip={v.description || undefined}
                   >
                     <div className="dot" />
                     <span>{v.name || v.id}</span>
+                    {v.description && <InfoTip text={v.description} />}
                     {isDefault && (
                       <span className="view-default-badge">default</span>
                     )}

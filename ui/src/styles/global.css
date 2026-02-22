@@ -416,18 +416,44 @@ html.desktop-app .topbar {
   transform: scale(1.1);
 }
 
-/* ── Sidebar tooltips ── */
-[data-tooltip] {
-  cursor: pointer;
+/* ── Info tooltip ── */
+.info-tip {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
 
-[data-tooltip]::after {
-  content: attr(data-tooltip);
+.info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.scenario-item:hover .info-btn,
+.rule-item:hover .info-btn {
+  opacity: 1;
+}
+
+.info-tip-text {
   position: absolute;
-  left: 0;
+  right: 0;
   top: 100%;
+  margin-top: 0.35rem;
   z-index: 20;
   max-width: 22rem;
+  min-width: 10rem;
   padding: 0.4rem 0.6rem;
   border-radius: var(--radius-sm);
   background: var(--panel-strong);
@@ -439,12 +465,15 @@ html.desktop-app .topbar {
   box-shadow: var(--shadow-md);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.25s;
+  transition: opacity 0.2s;
 }
 
-[data-tooltip]:hover::after {
+.info-tip:hover .info-tip-text {
   opacity: 1;
-  transition-delay: 0.7s;
+}
+
+.info-tip:hover .info-btn {
+  color: var(--ink);
 }
 
 .view-default-badge {
@@ -496,6 +525,9 @@ html.desktop-app .topbar {
 }
 
 .rule-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.25rem 0;
   font-size: 0.85rem;
   color: var(--ink-muted);
@@ -572,56 +604,7 @@ html.desktop-app .topbar {
   opacity: 0.7;
 }
 
-/* CA certificate section */
-.ca-status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
 
-.ca-status-row .label {
-  font-size: 0.95rem;
-  font-weight: 500;
-}
-
-.ca-status-row .state {
-  font-size: 0.7rem;
-  font-weight: 600;
-  font-family: var(--mono);
-  padding: 0.2rem 0.5rem;
-  border-radius: 0.25rem;
-  letter-spacing: 0.02rem;
-  transition: all 0.2s;
-}
-
-.ca-status-row .state.trusted {
-  background: var(--success-subtle);
-  color: var(--success);
-}
-
-.ca-status-row .state.untrusted {
-  background: var(--warn-subtle);
-  color: var(--warn);
-}
-
-.ca-actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.ca-actions button {
-  flex: 1;
-}
-
-.ca-note {
-  font-size: 0.7rem;
-  color: var(--ink-faint);
-  margin-top: 0.4rem;
-  line-height: 1.4;
-  font-style: italic;
-}
 
 /* ════════════════════════════════════════════
    Content area

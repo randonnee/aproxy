@@ -1,8 +1,7 @@
 import { ProxyToggle } from "./ProxyToggle";
-import { CaCertificate } from "./CaCertificate";
+import { CaTrust } from "./CaCertificate";
 import { ScenarioList } from "./ScenarioList";
 import { ViewList } from "./ViewList";
-import { SimulatorList } from "./SimulatorList";
 
 export function Sidebar() {
   return (
@@ -10,8 +9,7 @@ export function Sidebar() {
       <ProxyToggle />
       <ScenarioList />
       <ViewList />
-      <SimulatorList />
-      <CaCertificate />
+      <CaTrust />
     </div>
   );
 }
