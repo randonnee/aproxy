@@ -20,18 +20,36 @@ const uiFallbackPath = join(import.meta.dir, "ui.html");
 // APROXY_EXAMPLES_DIR: set by Electrobun entry to point at bundled examples.
 const examplesDir = process.env.APROXY_EXAMPLES_DIR ?? join(import.meta.dir, "..", "examples");
 
-// CORS headers for cross-origin requests (needed when the desktop app loads
-// the UI via views:// protocol and API calls go to http://127.0.0.1:8080).
-const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+// CORS origin allowlist.  Cross-origin requests are only expected from the
+// Electrobun desktop app (views:// protocol) and, during development, the Vite
+// HMR dev server.  Everything else (standalone browser mode) is same-origin and
+// doesn't need CORS headers at all.
+const ALLOWED_ORIGINS = new Set([
+  "views://mainview",              // Electrobun production build
+  "http://localhost:3000",         // Vite dev server (HMR)
+  "http://127.0.0.1:3000",        // Vite dev server (alt)
+]);
 
-/** Append CORS headers to an existing Response */
-function withCors(res: Response): Response {
-  for (const [k, v] of Object.entries(CORS_HEADERS)) {
-    res.headers.set(k, v);
+/** Build CORS headers for the given request, or null if the origin is not allowed. */
+function corsHeaders(req: Request): Record<string, string> | null {
+  const origin = req.headers.get("origin");
+  if (!origin) return null;                       // same-origin / no CORS needed
+  if (!ALLOWED_ORIGINS.has(origin)) return null;  // unknown origin — deny CORS
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin",
+  };
+}
+
+/** Append CORS headers to an existing Response (if the origin is allowed). */
+function withCors(res: Response, req: Request): Response {
+  const headers = corsHeaders(req);
+  if (headers) {
+    for (const [k, v] of Object.entries(headers)) {
+      res.headers.set(k, v);
+    }
   }
   return res;
 }
@@ -78,7 +96,7 @@ export function createServer(
 ) {
   return Effect.try(() =>
     createTcpProxy({
-      hostname: process.env.HOST ?? "0.0.0.0",
+      hostname: process.env.HOST ?? "127.0.0.1",
       port: Number(process.env.PROXY_PORT ?? 8080),
       fetchHandler,
       emitEvent,
@@ -157,7 +175,8 @@ export function createRoutes(
 
       // Handle CORS preflight requests for cross-origin API access
       if (isControlRequest && req.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
+        const headers = corsHeaders(req);
+        return new Response(null, { status: 204, headers: headers ?? {} });
       }
 
       if (isControlRequest && url?.pathname === "/events" && req.method === "GET") {
@@ -466,7 +485,7 @@ export function createRoutes(
 
       return yield* _(deps.handleProxy(req));
     }).pipe(
-      Effect.map((res) => _isControlRequest ? withCors(res) : res),
+      Effect.map((res) => _isControlRequest ? withCors(res, req) : res),
       Effect.catchAll((err) => Effect.sync(() => {
         const message = err instanceof CommandError
           ? err.message
@@ -474,7 +493,7 @@ export function createRoutes(
             ? String((err as any).cause ?? err)
             : String(err);
         console.error(`[route error] ${message}`);
-        return withCors(Response.json({ error: message }, { status: 400 }));
+        return withCors(Response.json({ error: message }, { status: 400 }), req);
       })),
     );
   };
