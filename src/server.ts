@@ -79,6 +79,12 @@ const listLocalHosts = () => {
 };
 
 const getPreferredHost = () => {
+  const bound = process.env.HOST ?? "127.0.0.1";
+  // If the server binds to a specific address (not all interfaces), that's
+  // the address clients should use — return it directly.
+  if (bound !== "0.0.0.0") return bound;
+  // Bound to all interfaces — pick the first LAN IPv4 address so that
+  // networksetup configures the system proxy to an address that works.
   for (const host of listLocalHosts()) {
     if (host !== "localhost" && host !== "127.0.0.1") return host;
   }
