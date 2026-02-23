@@ -4,6 +4,9 @@ import type {
   RequestEvent,
   ResponseEvent,
   ErrorEvent,
+  WebSocketOpenEvent,
+  WebSocketCloseEvent,
+  WebSocketMessageEvent,
   Scenario,
   ViewDef,
   SimulatorInfo,
@@ -22,7 +25,7 @@ type ViewFilter = (context: {
   mocked?: boolean;
 }) => boolean;
 
-export type DetailTab = "headers" | "body";
+export type DetailTab = "headers" | "body" | "messages";
 
 interface AppState {
   // Connection
@@ -39,6 +42,9 @@ interface AppState {
   addRequest: (evt: RequestEvent) => void;
   updateResponse: (evt: ResponseEvent) => void;
   updateError: (evt: ErrorEvent) => void;
+  updateWsOpen: (evt: WebSocketOpenEvent) => void;
+  updateWsClose: (evt: WebSocketCloseEvent) => void;
+  addWsMessage: (evt: WebSocketMessageEvent) => void;
   selectRequest: (id: string | null) => void;
   setReqTab: (tab: DetailTab) => void;
   setResTab: (tab: DetailTab) => void;
@@ -155,6 +161,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { requests };
     }),
 
+  updateWsOpen: (evt) =>
+    set((state) => {
+      const requests = new Map(state.requests);
+      const entry = requests.get(evt.id);
+      if (entry) {
+        entry.wsOpen = true;
+        requests.set(evt.id, { ...entry });
+      }
+      return { requests };
+    }),
+
+  updateWsClose: (evt) =>
+    set((state) => {
+      const requests = new Map(state.requests);
+      const entry = requests.get(evt.id);
+      if (entry) {
+        entry.wsClosed = true;
+        requests.set(evt.id, { ...entry });
+      }
+      return { requests };
+    }),
+
+  addWsMessage: (evt) =>
+    set((state) => {
+      const requests = new Map(state.requests);
+      const entry = requests.get(evt.id);
+      if (entry) {
+        const wsMessages = [...(entry.wsMessages || []), evt];
+        requests.set(evt.id, { ...entry, wsMessages });
+      }
+      return { requests };
+    }),
+
   selectRequest: (id) => set({ selectedId: id }),
   setReqTab: (tab) => set({ reqTab: tab }),
   setResTab: (tab) => set({ resTab: tab }),
@@ -168,7 +207,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Filters
   searchQuery: "",
-  methodFilters: new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]),
+  methodFilters: new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "WS"]),
   setSearchQuery: (q) => set({ searchQuery: q }),
   toggleMethodFilter: (method) =>
     set((state) => {

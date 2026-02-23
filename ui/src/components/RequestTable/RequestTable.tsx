@@ -169,8 +169,11 @@ export function RequestTable() {
             : err
               ? "ERR"
               : "...";
+          const isWs = req.method === "WS";
           const duration = res
-            ? `${res.durationMs}ms`
+            ? isWs
+              ? (entry.wsClosed ? "closed" : "open")
+              : `${res.durationMs}ms`
             : err
               ? "err"
               : "";
@@ -181,6 +184,7 @@ export function RequestTable() {
             "rtable-row",
             id === selectedId ? "selected" : "",
             mocked ? "mocked" : "",
+            isWs ? "websocket" : "",
           ]
             .filter(Boolean)
             .join(" ");

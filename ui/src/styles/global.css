@@ -31,6 +31,8 @@
   --error-subtle: rgba(212, 106, 106, 0.12);
   --purple: #a882c5;
   --purple-subtle: rgba(168, 130, 197, 0.11);
+  --cyan: #22d3ee;
+  --cyan-subtle: rgba(34, 211, 238, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
   --scrollbar-thumb: rgba(235, 225, 215, 0.08);
@@ -61,6 +63,8 @@
   --error-subtle: rgba(184, 68, 68, 0.07);
   --purple: #7650a0;
   --purple-subtle: rgba(118, 80, 160, 0.07);
+  --cyan: #0891b2;
+  --cyan-subtle: rgba(8, 145, 178, 0.08);
   --shadow-sm: 0 1px 2px rgba(30, 20, 10, 0.06);
   --shadow-md: 0 3px 12px rgba(30, 20, 10, 0.1);
   --scrollbar-thumb: rgba(50, 40, 35, 0.1);
@@ -755,6 +759,12 @@ html.desktop-app .topbar {
   background: var(--purple-subtle);
 }
 
+.method-chip.active .method-label.method-WS {
+  color: var(--cyan);
+  border-color: rgba(34, 211, 238, 0.3);
+  background: var(--cyan-subtle);
+}
+
 /* ════════════════════════════════════════════
    Buttons
    ════════════════════════════════════════════ */
@@ -940,7 +950,123 @@ button.danger:hover {
   color: var(--purple);
 }
 
+.method-WS {
+  color: var(--cyan, #22d3ee);
+}
+
+/* WebSocket row styling */
+.rtable-row.websocket {
+  border-left: 2px solid var(--cyan, #22d3ee);
+}
+
+/* WebSocket status in detail panel */
+.pane-ws-status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.pane-ws-status.open {
+  color: var(--success);
+}
+
+.pane-ws-status.closed {
+  color: var(--muted);
+}
+
+/* ════════════════════════════════════════════
+   WebSocket Messages Tab
+   ════════════════════════════════════════════ */
+.ws-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.ws-msg {
+  display: flex;
+  flex-direction: column;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.ws-msg-send {
+  background: rgba(34, 211, 238, 0.06);
+  border-left: 2px solid var(--cyan);
+}
+
+.ws-msg-receive {
+  background: rgba(139, 92, 246, 0.06);
+  border-left: 2px solid var(--accent);
+}
+
+.ws-msg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.ws-msg-dir {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.ws-msg-dir.send {
+  color: var(--cyan);
+}
+
+.ws-msg-dir.receive {
+  color: var(--accent);
+}
+
+.ws-msg-time {
+  font-family: var(--mono);
+}
+
+.ws-msg-size {
+  font-family: var(--mono);
+  opacity: 0.7;
+}
+
+.ws-msg-binary {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.ws-msg-data {
+  margin: 0;
+  padding: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ws-msg-data.ws-msg-json {
+  color: var(--cyan);
+}
+
 /* Status colors */
+.status-1xx {
+  color: var(--cyan);
+}
+
 .status-2xx {
   color: var(--success);
 }
@@ -1071,6 +1197,10 @@ button.danger:hover {
   font-weight: 700;
   font-size: 0.75rem;
   flex-shrink: 0;
+}
+
+.status-badge.status-1xx {
+  color: var(--cyan);
 }
 
 .status-badge.status-2xx {

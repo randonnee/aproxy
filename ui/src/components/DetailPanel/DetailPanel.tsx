@@ -1,12 +1,19 @@
 import { useAppStore, type DetailTab } from "../../stores/appStore";
 import { HeadersTab } from "./HeadersTab";
 import { BodyTab } from "./BodyTab";
+import { MessagesTab } from "./MessagesTab";
 import { ResizeHandle } from "./ResizeHandle";
 import { parseUrl, formatTime } from "../../lib/helpers";
 
 const TABS: Array<{ id: DetailTab; label: string }> = [
   { id: "headers", label: "Headers" },
   { id: "body", label: "Body" },
+];
+
+const WS_TABS: Array<{ id: DetailTab; label: string }> = [
+  { id: "headers", label: "Headers" },
+  { id: "body", label: "Body" },
+  { id: "messages", label: "Messages" },
 ];
 
 export function DetailPanel() {
@@ -74,6 +81,8 @@ function ResponsePane() {
 
   const res = entry?.response;
   const err = entry?.error;
+  const isWs = entry?.request?.method === "WS";
+  const tabs = isWs ? WS_TABS : TABS;
 
   return (
     <div className="detail-pane">
@@ -84,7 +93,14 @@ function ResponsePane() {
               <span className={`status-badge status-${Math.floor(res.status / 100)}xx`}>
                 {res.status}
               </span>
-              <span className="pane-duration">{res.durationMs}ms</span>
+              {isWs ? (
+                <span className={`pane-ws-status ${entry?.wsClosed ? "closed" : "open"}`}>
+                  {entry?.wsClosed ? "Closed" : "Open"}
+                  {entry?.wsMessages ? ` \u00b7 ${entry.wsMessages.length} msg${entry.wsMessages.length !== 1 ? "s" : ""}` : ""}
+                </span>
+              ) : (
+                <span className="pane-duration">{res.durationMs}ms</span>
+              )}
               {res.mocked && <span className="pane-mocked">mocked</span>}
             </>
           ) : err ? (
@@ -94,7 +110,7 @@ function ResponsePane() {
           )}
         </div>
         <div className="detail-tabs">
-          {TABS.map((tab) => (
+          {tabs.map((tab) => (
             <div
               key={tab.id}
               className={`detail-tab${resTab === tab.id ? " active" : ""}`}
@@ -110,6 +126,7 @@ function ResponsePane() {
           <HeadersTab headers={res?.headers} label="Response" />
         )}
         {resTab === "body" && <BodyTab response={res} />}
+        {resTab === "messages" && <MessagesTab messages={entry?.wsMessages} />}
       </div>
     </div>
   );

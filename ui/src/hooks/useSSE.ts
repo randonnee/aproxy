@@ -11,6 +11,9 @@ export function useSSE() {
   const addRequest = useAppStore((s) => s.addRequest);
   const updateResponse = useAppStore((s) => s.updateResponse);
   const updateError = useAppStore((s) => s.updateError);
+  const updateWsOpen = useAppStore((s) => s.updateWsOpen);
+  const updateWsClose = useAppStore((s) => s.updateWsClose);
+  const addWsMessage = useAppStore((s) => s.addWsMessage);
   const setSimulators = useAppStore((s) => s.setSimulators);
 
   useEffect(() => {
@@ -31,6 +34,15 @@ export function useSSE() {
             break;
           case "error":
             updateError(evt);
+            break;
+          case "ws_open":
+            updateWsOpen(evt);
+            break;
+          case "ws_close":
+            updateWsClose(evt);
+            break;
+          case "ws_message":
+            addWsMessage(evt);
             break;
           case "rules_list":
             // Refresh scenarios from API
@@ -62,5 +74,5 @@ export function useSSE() {
       source.close();
       sourceRef.current = null;
     };
-  }, [setConnected, addRequest, updateResponse, updateError, setSimulators]);
+  }, [setConnected, addRequest, updateResponse, updateError, updateWsOpen, updateWsClose, addWsMessage, setSimulators]);
 }

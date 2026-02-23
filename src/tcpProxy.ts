@@ -4,6 +4,8 @@ import type { CaCert } from "./ca";
 import { Effect } from "effect";
 import { handleConnect } from "./tunnel";
 import { handleMitm } from "./mitm";
+import { isWebSocketUpgrade, stripHopByHopForWebSocket, headersToRecord } from "./http";
+import { createFrameParser } from "./wsFrameParser";
 
 /**
  * State machine for each client connection.
@@ -35,6 +37,10 @@ type SocketData = {
   expectedBodyLength?: number;
   /** Flush overflow callback for MITM backpressure handling */
   flushOverflow?: () => void;
+  /** Frame parser for client->server WebSocket messages (send direction) */
+  wsClientParser?: (data: Buffer | Uint8Array) => void;
+  /** Frame parser for server->client WebSocket messages (receive direction) */
+  wsServerParser?: (data: Buffer | Uint8Array) => void;
 };
 
 type FetchHandler = (req: Request) => Effect.Effect<Response, any>;
@@ -75,6 +81,8 @@ export function createTcpProxy(opts: {
           // Tunnel mode: forward to peer
           const peer = socket.data.peer;
           if (peer) {
+            // Parse WebSocket frames if parsers are attached (client->server = send)
+            socket.data.wsClientParser?.(data);
             peer.write(data);
           } else {
             // Upstream not connected yet, buffer
@@ -99,7 +107,8 @@ export function createTcpProxy(opts: {
               socket.data.bodyBuffer,
               socket.data.method!,
               socket.data.target!,
-              fetchHandler
+              fetchHandler,
+              emitEvent
             );
           }
           return;
@@ -160,7 +169,7 @@ export function createTcpProxy(opts: {
             socket.data.expectedBodyLength = expectedBodyLength;
           } else {
             socket.data.state = "http";
-            handleHttpRequest(socket, headerSection, bodyStart, method, target, fetchHandler);
+            handleHttpRequest(socket, headerSection, bodyStart, method, target, fetchHandler, emitEvent);
           }
         }
       },
@@ -196,7 +205,8 @@ async function handleHttpRequest(
   body: Buffer,
   method: string,
   target: string,
-  fetchHandler: FetchHandler
+  fetchHandler: FetchHandler,
+  emitEvent?: (event: ProxyEvent) => void
 ) {
   try {
     const lines = headerSection.split("\r\n");
@@ -210,6 +220,11 @@ async function handleHttpRequest(
         const value = lines[i].substring(colonIdx + 1).trim();
         headers.append(name, value);
       }
+    }
+
+    // Check for WebSocket upgrade before entering the fetch pipeline
+    if (isWebSocketUpgrade(headers) && emitEvent) {
+      return handleWebSocketUpgrade(clientSocket, headerSection, headers, target, emitEvent);
     }
 
     // Build URL
@@ -269,5 +284,227 @@ async function handleHttpRequest(
     } catch {
       // socket already closed
     }
+  }
+}
+
+/**
+ * Handle a WebSocket upgrade request for plain HTTP (ws://).
+ *
+ * Instead of using fetch() (which cannot handle 101 Switching Protocols),
+ * we open a raw TCP connection to the upstream, forward the upgrade request
+ * with hop-by-hop headers preserved, and then transition to bidirectional piping.
+ */
+async function handleWebSocketUpgrade(
+  clientSocket: Socket<SocketData>,
+  headerSection: string,
+  headers: Headers,
+  target: string,
+  emitEvent: (event: ProxyEvent) => void
+) {
+  // Parse the upstream host/port from the target URL
+  let upstreamHost: string;
+  let upstreamPort: number;
+  let path: string;
+
+  try {
+    if (target.startsWith("http://") || target.startsWith("https://")) {
+      const url = new URL(target);
+      upstreamHost = url.hostname;
+      upstreamPort = url.port ? parseInt(url.port, 10) : (url.protocol === "https:" ? 443 : 80);
+      path = url.pathname + url.search;
+    } else {
+      const host = headers.get("host") ?? "localhost";
+      const [h, p] = host.split(":");
+      upstreamHost = h;
+      upstreamPort = p ? parseInt(p, 10) : 80;
+      path = target;
+    }
+  } catch {
+    clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+    clientSocket.end();
+    return;
+  }
+
+  const id = crypto.randomUUID();
+  const fullUrl = `ws://${upstreamHost}${upstreamPort !== 80 ? `:${upstreamPort}` : ""}${path}`;
+  const startedAt = Date.now();
+
+  // Emit request event for the WebSocket upgrade
+  emitEvent({
+    type: "request",
+    id,
+    method: "WS",
+    url: fullUrl,
+    headers: headersToRecord(headers),
+    timestamp: startedAt,
+  });
+
+  console.log(`[ws] upgrading ${fullUrl}`);
+
+  // Build the raw HTTP upgrade request to send to upstream
+  const outgoingHeaders = new Headers(headers);
+  stripHopByHopForWebSocket(outgoingHeaders);
+
+  let upgradeRequest = `GET ${path} HTTP/1.1\r\n`;
+  upgradeRequest += `Host: ${upstreamHost}${upstreamPort !== 80 ? `:${upstreamPort}` : ""}\r\n`;
+  upgradeRequest += `Connection: Upgrade\r\n`;
+  upgradeRequest += `Upgrade: websocket\r\n`;
+  outgoingHeaders.forEach((value, key) => {
+    // Skip headers we're already writing explicitly
+    if (key === "host" || key === "connection" || key === "upgrade") return;
+    upgradeRequest += `${key}: ${value}\r\n`;
+  });
+  upgradeRequest += "\r\n";
+
+  try {
+    // Track whether we've received the 101 response
+    let handshakeComplete = false;
+    let handshakeBuffer = Buffer.alloc(0);
+
+    await Bun.connect<{ peer: Socket<any> }>({
+      hostname: upstreamHost,
+      port: upstreamPort,
+      socket: {
+        open(upstreamSocket) {
+          upstreamSocket.data = { peer: clientSocket };
+          // Send the upgrade request to upstream
+          upstreamSocket.write(upgradeRequest);
+        },
+        data(upstreamSocket, data) {
+          if (handshakeComplete) {
+            // After handshake: parse frames (server->client = "receive") and pipe to client
+            clientSocket.data.wsServerParser?.(data);
+            clientSocket.write(data);
+            return;
+          }
+
+          // Accumulate handshake response
+          handshakeBuffer = Buffer.concat([handshakeBuffer, Buffer.from(data)]);
+          const headerEnd = handshakeBuffer.indexOf("\r\n\r\n");
+          if (headerEnd === -1) return; // waiting for more headers
+
+          const responseHeaderStr = handshakeBuffer.subarray(0, headerEnd).toString("utf-8");
+          const remaining = handshakeBuffer.subarray(headerEnd + 4);
+
+          // Check for 101 status
+          const statusLine = responseHeaderStr.split("\r\n")[0];
+          const statusMatch = statusLine.match(/HTTP\/1\.\d\s+(\d+)/);
+          const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+
+          if (statusCode === 101) {
+            handshakeComplete = true;
+
+            // Parse response headers for the event
+            const responseHeaders: Record<string, string> = {};
+            const respLines = responseHeaderStr.split("\r\n");
+            for (let i = 1; i < respLines.length; i++) {
+              const ci = respLines[i].indexOf(":");
+              if (ci > 0) {
+                responseHeaders[respLines[i].substring(0, ci).trim().toLowerCase()] = respLines[i].substring(ci + 1).trim();
+              }
+            }
+
+            // Transition the client socket to tunnel mode
+            clientSocket.data.state = "tunnel";
+            clientSocket.data.peer = upstreamSocket;
+
+            // Set up frame parsers for WebSocket message capture
+            clientSocket.data.wsClientParser = createFrameParser((msg) => {
+              emitEvent({
+                type: "ws_message",
+                id,
+                direction: "send",
+                data: msg.data,
+                binary: msg.opcode === "binary",
+                size: msg.size,
+                timestamp: Date.now(),
+              });
+            });
+            clientSocket.data.wsServerParser = createFrameParser((msg) => {
+              emitEvent({
+                type: "ws_message",
+                id,
+                direction: "receive",
+                data: msg.data,
+                binary: msg.opcode === "binary",
+                size: msg.size,
+                timestamp: Date.now(),
+              });
+            });
+
+            // Forward the complete 101 response to the client
+            clientSocket.write(handshakeBuffer.subarray(0, headerEnd + 4));
+
+            // Forward any remaining data after the 101 headers
+            if (remaining.length > 0) {
+              clientSocket.write(remaining);
+            }
+
+            // Emit ws_open event
+            emitEvent({
+              type: "ws_open",
+              id,
+              url: fullUrl,
+              headers: headersToRecord(headers),
+              responseHeaders,
+              timestamp: Date.now(),
+            });
+
+            // Emit a response event so the UI shows the 101 status
+            emitEvent({
+              type: "response",
+              id,
+              status: 101,
+              headers: responseHeaders,
+              durationMs: Date.now() - startedAt,
+              timestamp: Date.now(),
+            });
+          } else {
+            // Non-101 response — forward it as-is and close
+            clientSocket.write(handshakeBuffer);
+            clientSocket.end();
+
+            emitEvent({
+              type: "response",
+              id,
+              status: statusCode,
+              headers: {},
+              durationMs: Date.now() - startedAt,
+              timestamp: Date.now(),
+            });
+          }
+        },
+        close(_upstreamSocket) {
+          // Emit ws_close event if handshake completed
+          if (handshakeComplete) {
+            emitEvent({
+              type: "ws_close",
+              id,
+              timestamp: Date.now(),
+            });
+          }
+          clientSocket.end();
+        },
+        error(upstreamSocket, error) {
+          console.error(`[ws] upstream error for ${fullUrl}:`, error?.message ?? error);
+          upstreamSocket.data.peer?.end();
+        },
+        connectError(_socket, error) {
+          console.error(`[ws] connect failed for ${fullUrl}:`, error?.message ?? error);
+          clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+          clientSocket.end();
+          emitEvent({
+            type: "error",
+            id,
+            message: `WebSocket connect failed: ${error?.message ?? error}`,
+            timestamp: Date.now(),
+          });
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error(`[ws] failed to set up WebSocket tunnel for ${fullUrl}:`, err?.message ?? err);
+    clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    clientSocket.end();
   }
 }

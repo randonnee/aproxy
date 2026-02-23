@@ -23,10 +23,41 @@ export interface ErrorEvent {
   message: string;
 }
 
+export interface WebSocketOpenEvent {
+  type: "ws_open";
+  id: string;
+  url: string;
+  headers: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  timestamp: number;
+}
+
+export interface WebSocketCloseEvent {
+  type: "ws_close";
+  id: string;
+  timestamp: number;
+}
+
+export interface WebSocketMessageEvent {
+  type: "ws_message";
+  id: string;
+  direction: "send" | "receive";
+  data: string;
+  binary: boolean;
+  size: number;
+  timestamp: number;
+}
+
 export interface RequestEntry {
   request?: RequestEvent;
   response?: ResponseEvent;
   error?: ErrorEvent;
+  /** WebSocket connection is open (upgrade completed) */
+  wsOpen?: boolean;
+  /** WebSocket connection has been closed */
+  wsClosed?: boolean;
+  /** Captured WebSocket messages */
+  wsMessages?: WebSocketMessageEvent[];
 }
 
 export interface Scenario {
@@ -59,6 +90,9 @@ export type SSEEvent =
   | RequestEvent
   | ResponseEvent
   | ErrorEvent
+  | WebSocketOpenEvent
+  | WebSocketCloseEvent
+  | WebSocketMessageEvent
   | { type: "rules_list" }
   | { type: "views_list" }
   | { type: "simulators_list"; simulators: SimulatorInfo[] };

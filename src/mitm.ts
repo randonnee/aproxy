@@ -3,6 +3,8 @@ import type { ProxyEvent } from "./models";
 import type { CaCert } from "./ca";
 import { getHostCert } from "./ca";
 import { Effect } from "effect";
+import { isWebSocketUpgrade, headersToRecord } from "./http";
+import { createFrameParser } from "./wsFrameParser";
 
 /**
  * MITM tunnel handler for HTTPS interception.
@@ -32,8 +34,8 @@ type MitmContext = {
   fetchHandler: FetchHandler;
   /** Whether a request is currently being processed (prevents concurrent handling) */
   processing: boolean;
-  /** Parser state: "headers" = waiting for full headers, "body" = waiting for full body */
-  state: "headers" | "body";
+  /** Parser state: "headers" = waiting for full headers, "body" = waiting for full body, "websocket" = raw piping mode */
+  state: "headers" | "body" | "websocket";
   /** Parsed request info (set during "body" state while waiting for body bytes) */
   pendingRequest?: {
     method: string;
@@ -43,6 +45,14 @@ type MitmContext = {
   };
   /** Resolve function for the current drain wait (backpressure) */
   drainResolve?: () => void;
+  /** Upstream socket for WebSocket piping mode */
+  wsUpstream?: Socket<any>;
+  /** Request ID for emitting WebSocket message events */
+  wsRequestId?: string;
+  /** Frame parser for client->server (send) direction */
+  wsClientParser?: (data: Buffer | Uint8Array) => void;
+  /** Frame parser for server->client (receive) direction */
+  wsServerParser?: (data: Buffer | Uint8Array) => void;
 };
 
 /**
@@ -131,7 +141,10 @@ export async function handleMitm(
           ctx.drainResolve?.();
         },
         close(_socket) {
-          // TLS client disconnected
+          // TLS client disconnected — close WebSocket upstream if active
+          if (ctx.state === "websocket" && ctx.wsUpstream) {
+            ctx.wsUpstream.end();
+          }
         },
         error(_socket, error) {
           console.error(`[mitm] TLS socket error for ${host}:${port}:`, error?.message ?? error);
@@ -252,6 +265,16 @@ function handleDecryptedData(
   data: Buffer | Uint8Array,
   ctx: MitmContext
 ) {
+  // WebSocket mode: parse frames and forward raw bytes to upstream
+  if (ctx.state === "websocket") {
+    if (ctx.wsUpstream && data.length > 0) {
+      // Parse frames for event emission (client->server = "send")
+      ctx.wsClientParser?.(data);
+      ctx.wsUpstream.write(data);
+    }
+    return;
+  }
+
   // Accumulate bytes
   if (data.length > 0) {
     ctx.buffer = Buffer.concat([ctx.buffer, Buffer.from(data)]);
@@ -308,6 +331,12 @@ function processNext(socket: Socket<{}>, ctx: MitmContext) {
         const value = lines[i].substring(colonIdx + 1).trim();
         headers.append(name, value);
       }
+    }
+
+    // Check for WebSocket upgrade
+    if (isWebSocketUpgrade(headers)) {
+      dispatchWebSocketUpgrade(socket, ctx, path, headers);
+      return;
     }
 
     const contentLengthStr = headers.get("content-length");
@@ -435,6 +464,241 @@ function dispatchRequest(
     // Process next request if data is buffered (keep-alive)
     if (ctx.buffer.length > 0) {
       processNext(socket, ctx);
+    }
+  })();
+}
+
+/**
+ * Handle a WebSocket upgrade request detected in the MITM decrypted HTTP parser.
+ *
+ * Opens a raw TLS connection to the upstream server, forwards the upgrade request
+ * with hop-by-hop headers preserved, and on receiving a 101 response, transitions
+ * the MITM context to "websocket" state for bidirectional raw piping.
+ */
+function dispatchWebSocketUpgrade(
+  tlsSocket: Socket<{}>,
+  ctx: MitmContext,
+  path: string,
+  headers: Headers
+) {
+  const { hostname, port, emitEvent } = ctx;
+  ctx.processing = true;
+
+  const id = crypto.randomUUID();
+  const fullUrl = `wss://${hostname}${port !== 443 ? `:${port}` : ""}${path}`;
+  const startedAt = Date.now();
+
+  // Emit request event for the WebSocket upgrade
+  emitEvent({
+    type: "request",
+    id,
+    method: "WS",
+    url: fullUrl,
+    headers: headersToRecord(headers),
+    timestamp: startedAt,
+  });
+
+  console.log(`[mitm-ws] upgrading ${fullUrl}`);
+
+  // Build the raw HTTP upgrade request to forward to the upstream.
+  // We explicitly set Connection: Upgrade and Upgrade: websocket because some
+  // clients (e.g. iOS URLSessionWebSocketTask) may not include these headers
+  // when going through a MITM proxy, relying on the transport layer instead.
+  let upgradeRequest = `GET ${path} HTTP/1.1\r\n`;
+  upgradeRequest += `Host: ${hostname}${port !== 443 ? `:${port}` : ""}\r\n`;
+  upgradeRequest += `Upgrade: websocket\r\n`;
+  upgradeRequest += `Connection: Upgrade\r\n`;
+  headers.forEach((value, key) => {
+    const k = key.toLowerCase();
+    // Skip headers we already wrote explicitly above
+    if (k === "host" || k === "connection" || k === "upgrade") return;
+    // Skip hop-by-hop headers that shouldn't be forwarded
+    if (k === "keep-alive" || k === "proxy-authenticate" || k === "proxy-authorization" ||
+        k === "te" || k === "trailer" || k === "transfer-encoding" || k === "proxy-connection") return;
+    upgradeRequest += `${key}: ${value}\r\n`;
+  });
+  upgradeRequest += "\r\n";
+
+  // Open a TLS connection to the upstream server
+  let handshakeComplete = false;
+  let handshakeBuffer = Buffer.alloc(0);
+
+  (async () => {
+    try {
+      await Bun.connect<{}>({
+        hostname,
+        port,
+        tls: {
+          // Force HTTP/1.1 — WebSocket upgrade requires HTTP/1.1 and cannot work over h2.
+          // Without this, servers that prefer h2 (e.g. echo.websocket.org) will negotiate
+          // HTTP/2 and the 101 Switching Protocols response will never come.
+          ALPNProtocols: Buffer.from("\x08http/1.1"),
+        },
+        socket: {
+          open(upstreamSocket) {
+            // Send the upgrade request to upstream
+            upstreamSocket.write(upgradeRequest);
+
+            // Also forward any buffered data that arrived after the upgrade headers
+            if (ctx.buffer.length > 0) {
+              // This shouldn't normally happen for WebSocket (no body in upgrade request),
+              // but handle it defensively
+            }
+          },
+          data(upstreamSocket, data) {
+            if (handshakeComplete) {
+              // After handshake: parse frames (server->client = "receive") and pipe to TLS socket
+              ctx.wsServerParser?.(data);
+              tlsSocket.write(data);
+              return;
+            }
+
+            // Accumulate handshake response
+            handshakeBuffer = Buffer.concat([handshakeBuffer, Buffer.from(data)]);
+            const headerEnd = handshakeBuffer.indexOf("\r\n\r\n");
+            if (headerEnd === -1) return; // waiting for more headers
+
+            const responseHeaderStr = handshakeBuffer.subarray(0, headerEnd).toString("utf-8");
+            const remaining = handshakeBuffer.subarray(headerEnd + 4);
+
+            // Check for 101 status
+            const statusLine = responseHeaderStr.split("\r\n")[0];
+            const statusMatch = statusLine.match(/HTTP\/1\.\d\s+(\d+)/);
+            const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+
+            if (statusCode === 101) {
+              handshakeComplete = true;
+
+              // Parse response headers for the event
+              const responseHeaders: Record<string, string> = {};
+              const respLines = responseHeaderStr.split("\r\n");
+              for (let i = 1; i < respLines.length; i++) {
+                const ci = respLines[i].indexOf(":");
+                if (ci > 0) {
+                  responseHeaders[respLines[i].substring(0, ci).trim().toLowerCase()] = respLines[i].substring(ci + 1).trim();
+                }
+              }
+
+              // Transition the MITM context to WebSocket piping mode
+              ctx.state = "websocket";
+              ctx.wsUpstream = upstreamSocket;
+              ctx.wsRequestId = id;
+              ctx.processing = false;
+
+              // Set up frame parsers for message capture
+              ctx.wsClientParser = createFrameParser((msg) => {
+                emitEvent({
+                  type: "ws_message",
+                  id,
+                  direction: "send",
+                  data: msg.data,
+                  binary: msg.opcode === "binary",
+                  size: msg.size,
+                  timestamp: Date.now(),
+                });
+              });
+              ctx.wsServerParser = createFrameParser((msg) => {
+                emitEvent({
+                  type: "ws_message",
+                  id,
+                  direction: "receive",
+                  data: msg.data,
+                  binary: msg.opcode === "binary",
+                  size: msg.size,
+                  timestamp: Date.now(),
+                });
+              });
+
+              // Forward the 101 response back to the client via the TLS socket
+              tlsSocket.write(handshakeBuffer.subarray(0, headerEnd + 4));
+
+              // Forward any remaining data after the 101 headers
+              if (remaining.length > 0) {
+                tlsSocket.write(remaining);
+              }
+
+              // Emit ws_open event
+              emitEvent({
+                type: "ws_open",
+                id,
+                url: fullUrl,
+                headers: headersToRecord(headers),
+                responseHeaders,
+                timestamp: Date.now(),
+              });
+
+              // Emit a response event so the UI shows the 101 status
+              emitEvent({
+                type: "response",
+                id,
+                status: 101,
+                headers: responseHeaders,
+                durationMs: Date.now() - startedAt,
+                timestamp: Date.now(),
+              });
+            } else {
+              // Non-101 response — forward it as raw HTTP and resume normal parsing
+              ctx.processing = false;
+              ctx.state = "headers";
+
+              // Write the full response back through the TLS socket
+              socketWrite(tlsSocket, handshakeBuffer, ctx).then(() => {
+                // Resume processing any buffered data
+                if (ctx.buffer.length > 0) {
+                  processNext(tlsSocket, ctx);
+                }
+              });
+
+              emitEvent({
+                type: "response",
+                id,
+                status: statusCode,
+                headers: {},
+                durationMs: Date.now() - startedAt,
+                timestamp: Date.now(),
+              });
+
+              upstreamSocket.end();
+            }
+          },
+          close(_upstreamSocket) {
+            if (handshakeComplete) {
+              emitEvent({
+                type: "ws_close",
+                id,
+                timestamp: Date.now(),
+              });
+              // Close the TLS socket when upstream closes
+              tlsSocket.end();
+            }
+          },
+          error(_upstreamSocket, error) {
+            console.error(`[mitm-ws] upstream error for ${fullUrl}:`, error?.message ?? error);
+            if (!handshakeComplete) {
+              ctx.processing = false;
+              ctx.state = "headers";
+              tlsSocket.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            }
+          },
+          connectError(_socket, error) {
+            console.error(`[mitm-ws] connect failed for ${fullUrl}:`, error?.message ?? error);
+            ctx.processing = false;
+            ctx.state = "headers";
+            tlsSocket.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            emitEvent({
+              type: "error",
+              id,
+              message: `WebSocket connect failed: ${error?.message ?? error}`,
+              timestamp: Date.now(),
+            });
+          },
+        },
+      });
+    } catch (err: any) {
+      console.error(`[mitm-ws] failed to connect to ${hostname}:${port}:`, err?.message ?? err);
+      ctx.processing = false;
+      ctx.state = "headers";
+      tlsSocket.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
     }
   })();
 }

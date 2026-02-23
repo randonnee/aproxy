@@ -25,7 +25,32 @@ export type ErrorEvent = {
   timestamp: number;
 };
 
-export type ProxyEvent = RequestEvent | ResponseEvent | ErrorEvent;
+export type WebSocketOpenEvent = {
+  type: "ws_open";
+  id: string;
+  url: string;
+  headers: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  timestamp: number;
+};
+
+export type WebSocketCloseEvent = {
+  type: "ws_close";
+  id: string;
+  timestamp: number;
+};
+
+export type WebSocketMessageEvent = {
+  type: "ws_message";
+  id: string;
+  direction: "send" | "receive";
+  data: string;
+  binary: boolean;
+  size: number;
+  timestamp: number;
+};
+
+export type ProxyEvent = RequestEvent | ResponseEvent | ErrorEvent | WebSocketOpenEvent | WebSocketCloseEvent | WebSocketMessageEvent;
 
 export type RulesListEvent = {
   type: "rules_list";

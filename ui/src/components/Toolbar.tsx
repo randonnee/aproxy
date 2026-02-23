@@ -1,6 +1,6 @@
 import { useAppStore } from "../stores/appStore";
 
-const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"] as const;
+const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "WS"] as const;
 
 export function Toolbar() {
   const searchQuery = useAppStore((s) => s.searchQuery);

@@ -14,8 +14,47 @@ const hopByHopHeaders = new Set([
   "proxy-connection"
 ]);
 
+/** Headers that must be preserved for WebSocket upgrade requests. */
+const wsPreservedHeaders = new Set(["connection", "upgrade"]);
+
 export function stripHopByHop(headers: Headers) {
   for (const name of hopByHopHeaders) headers.delete(name);
+}
+
+/**
+ * Strip hop-by-hop headers but preserve Connection and Upgrade
+ * which are required for WebSocket handshakes.
+ */
+export function stripHopByHopForWebSocket(headers: Headers) {
+  for (const name of hopByHopHeaders) {
+    if (!wsPreservedHeaders.has(name)) headers.delete(name);
+  }
+}
+
+/** Check if a request is a WebSocket upgrade. */
+export function isWebSocketUpgrade(headers: Headers): boolean {
+  const upgrade = headers.get("upgrade");
+  const connection = headers.get("connection");
+
+  // Standard check: Upgrade: websocket + Connection includes "upgrade"
+  if (
+    upgrade !== null &&
+    upgrade.toLowerCase() === "websocket" &&
+    connection !== null &&
+    connection.toLowerCase().includes("upgrade")
+  ) {
+    return true;
+  }
+
+  // Fallback: some clients (e.g. iOS URLSessionWebSocketTask through MITM)
+  // may include Sec-WebSocket-Key without explicit Upgrade/Connection headers.
+  // The presence of Sec-WebSocket-Key + Sec-WebSocket-Version is a definitive
+  // indicator of a WebSocket upgrade request.
+  if (headers.has("sec-websocket-key") && headers.has("sec-websocket-version")) {
+    return true;
+  }
+
+  return false;
 }
 
 export function headersToRecord(headers: Headers) {
