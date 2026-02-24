@@ -23,6 +23,8 @@ jobs:
 
       - name: Build desktop app
         run: bunx electrobun build --env=stable
+        env:
+          NODE_ENV: production
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4

@@ -11,6 +11,12 @@ const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 const appBundleDir = resolve("../Resources/app");
 process.env.APROXY_EXAMPLES_DIR = resolve(appBundleDir, "examples");
 
+// Mark as production unless already set — must happen before importing server
+// code so the CORS allowlist is built without dev-only origins.
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "production";
+}
+
 // Dynamic import so env vars are set before server.ts resolves paths
 const { startProxy, disableProxySync } = await import("../index");
 

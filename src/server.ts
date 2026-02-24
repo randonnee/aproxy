@@ -26,8 +26,11 @@ const examplesDir = process.env.APROXY_EXAMPLES_DIR ?? join(import.meta.dir, "..
 // doesn't need CORS headers at all.
 const ALLOWED_ORIGINS = new Set([
   "views://mainview",              // Electrobun production build
-  "http://localhost:3000",         // Vite dev server (HMR)
-  "http://127.0.0.1:3000",        // Vite dev server (alt)
+  // Dev-only: allow Vite HMR dev server origins
+  ...(process.env.NODE_ENV !== "production" ? [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ] : []),
 ]);
 
 /** Build CORS headers for the given request, or null if the origin is not allowed. */
