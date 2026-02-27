@@ -4,6 +4,7 @@ import { BodyTab } from "./BodyTab";
 import { MessagesTab } from "./MessagesTab";
 import { ResizeHandle } from "./ResizeHandle";
 import { parseUrl, formatTime } from "../../lib/helpers";
+import type { RequestEvent } from "../../lib/types";
 
 const TABS: Array<{ id: DetailTab; label: string }> = [
   { id: "headers", label: "Headers" },
@@ -68,7 +69,7 @@ function RequestPane() {
       </div>
       <div className="detail-content">
         {reqTab === "headers" && <HeadersTab headers={req.headers} label="Request" />}
-        {reqTab === "body" && <div className="detail-empty">No request body captured</div>}
+        {reqTab === "body" && <RequestBodyTab request={req} />}
       </div>
     </div>
   );
@@ -130,4 +131,26 @@ function ResponsePane() {
       </div>
     </div>
   );
+}
+
+function RequestBodyTab({ request }: { request: RequestEvent }) {
+  if (!request.body) {
+    return <div className="detail-empty">No request body</div>;
+  }
+
+  const contentType =
+    request.headers?.["content-type"] ??
+    request.headers?.["Content-Type"] ??
+    "";
+
+  let formatted = request.body;
+  if (contentType.includes("json")) {
+    try {
+      formatted = JSON.stringify(JSON.parse(request.body), null, 2);
+    } catch {
+      // use raw body
+    }
+  }
+
+  return <pre className="body-viewer">{formatted}</pre>;
 }

@@ -159,16 +159,31 @@ export function handleHttpProxy(
     }
   })();
 
-  const requestEvent: ProxyEvent = {
-    type: "request",
-    id,
-    method: req.method,
-    url: req.url,
-    headers: headersToRecord(req.headers),
-    timestamp: startedAt
-  };
-
   return Effect.gen(function* (_) {
+    // Read request body for the event before forwarding (stream can only be consumed once)
+    let requestBodyText: string | undefined;
+    if (req.body && req.method !== "GET" && req.method !== "HEAD") {
+      const cloned = req.clone();
+      const bodyBytes = yield* _(
+        Effect.tryPromise(() => cloned.arrayBuffer()).pipe(
+          Effect.catchAll(() => Effect.succeed(undefined))
+        )
+      );
+      if (bodyBytes && bodyBytes.byteLength > 0) {
+        try { requestBodyText = new TextDecoder().decode(bodyBytes); } catch {}
+      }
+    }
+
+    const requestEvent: ProxyEvent = {
+      type: "request",
+      id,
+      method: req.method,
+      url: req.url,
+      headers: headersToRecord(req.headers),
+      timestamp: startedAt,
+      body: requestBodyText
+    };
+
     yield* _(Effect.sync(() => emitEvent(requestEvent)));
     if (!isUiRequest) {
       yield* _(Effect.sync(() => console.log(`[proxy] ${req.method} ${req.url}`)));

@@ -5,6 +5,7 @@ export type RequestEvent = {
   url: string;
   headers: Record<string, string>;
   timestamp: number;
+  body?: string;
 };
 
 export type ResponseEvent = {

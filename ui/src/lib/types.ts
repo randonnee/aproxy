@@ -5,6 +5,7 @@ export interface RequestEvent {
   url: string;
   headers: Record<string, string>;
   timestamp: number;
+  body?: string;
 }
 
 export interface ResponseEvent {
