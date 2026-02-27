@@ -1,4 +1,4 @@
-import type { ViewFactory } from "../../src/rules";
+import type { ViewFactory } from "../../shared/rules";
 
 export const views: ViewFactory[] = [
   () => ({

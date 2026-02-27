@@ -1,5 +1,5 @@
 import type { ProxyEvent } from "./models";
-import type { RuleHandler } from "./rules";
+import type { RuleHandler } from "../shared/rules";
 import { Effect } from "effect";
 import { ProxyError } from "./errors";
 import { headersToRecord, stripHopByHop } from "./http";

@@ -1,4 +1,4 @@
-import type { LoadedScenario, ScenarioFactory, LoadedView, ViewFactory } from "./rules";
+import type { LoadedScenario, ScenarioFactory, LoadedView, ViewFactory } from "../shared/rules";
 import { Effect } from "effect";
 import { watch, existsSync, mkdirSync } from "node:fs";
 import { RulesLoadError } from "./errors";

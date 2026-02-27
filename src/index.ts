@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import type { ProxyEvent, RulesListEvent, ViewsListEvent, SimulatorEvent } from "./models";
-import type { LoadedScenario, LoadedView } from "./rules";
+import type { LoadedScenario, LoadedView } from "../shared/rules";
 import type { CaCert } from "./ca";
 import { EventBus } from "./eventBus";
 import { ProxyError } from "./errors";
@@ -18,7 +18,7 @@ import {
 } from "./simulators";
 import { loadScenarios, loadViews, watchDir } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
-import { type RuleHandler } from "./rules";
+import { type RuleHandler } from "../shared/rules";
 import { ensureCa } from "./ca";
 import { loadConfig, saveConfig, type AproxyConfig } from "./config";
 import { join } from "node:path";

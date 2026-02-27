@@ -10,7 +10,7 @@
     "start": "bun src/index.ts",
     "go": "bun run --cwd ui build && bun src/index.ts",
     "bench": "bun run scripts/bench.ts",
-    "desktop": "electrobun dev",
+    "desktop": "bun run scripts/build-ui.ts && bun build src/electrobun/index.ts --outdir build/dev-macos-arm64/Aproxy-dev.app/Contents/Resources/app/bun --target bun && electrobun dev",
     "desktop:build": "electrobun build --env=stable"
   },
   "devDependencies": {

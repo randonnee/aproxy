@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar/Sidebar";
 import { Toolbar } from "./components/Toolbar";
 import { RequestTable } from "./components/RequestTable/RequestTable";
 import { DetailPanel } from "./components/DetailPanel/DetailPanel";
+import { ViewManager } from "./components/ViewManager/ViewManager";
 import { useSSE } from "./hooks/useSSE";
 import { useInitialData } from "./hooks/useInitialData";
 import { useAppStore } from "./stores/appStore";
@@ -15,6 +16,7 @@ export function App() {
   useInitialData();
 
   const theme = useAppStore((s) => s.theme);
+  const currentScreen = useAppStore((s) => s.currentScreen);
 
   // Keep data-theme attribute in sync
   useEffect(() => {
@@ -50,6 +52,17 @@ export function App() {
       document.documentElement.classList.add("desktop-app");
     }
   }, []);
+
+  if (currentScreen === "view-manager") {
+    return (
+      <>
+        <TopBar />
+        <div className="main">
+          <ViewManager />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

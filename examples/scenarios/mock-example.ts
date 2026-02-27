@@ -1,4 +1,4 @@
-import type { ScenarioFactory } from "../../src/rules";
+import type { ScenarioFactory } from "../../shared/rules";
 
 export const scenarios: ScenarioFactory[] = [
   () => {

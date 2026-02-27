@@ -3,7 +3,7 @@ import type { CaCert } from "./ca";
 import type { AproxyConfig } from "./config";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
-import { existsSync, readFileSync, readdirSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, copyFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
@@ -367,6 +367,73 @@ export function createRoutes(
           views: deps.getViews(),
           defaultViewId: deps.getConfig().defaultViewId,
         });
+      }
+
+      // --- View files CRUD ---
+
+      if (isControlRequest && url?.pathname === "/views/files" && req.method === "GET") {
+        if (!existsSync(deps.viewsDir)) mkdirSync(deps.viewsDir, { recursive: true });
+        const files = readdirSync(deps.viewsDir).filter((f) => /\.(ts|js)$/.test(f));
+        const result = files.map((filename) => ({
+          filename,
+          content: readFileSync(join(deps.viewsDir, filename), "utf-8"),
+        }));
+        return Response.json({ files: result });
+      }
+
+      if (isControlRequest && url?.pathname === "/views/files" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ filename: string; content: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const safeName = basename(body.filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+        if (!safeName || !/\.(ts|js)$/.test(safeName)) {
+          return Response.json({ error: "Filename must end with .ts or .js" }, { status: 400 });
+        }
+        if (!existsSync(deps.viewsDir)) mkdirSync(deps.viewsDir, { recursive: true });
+        const filePath = join(deps.viewsDir, safeName);
+        if (existsSync(filePath)) {
+          return Response.json({ error: `File already exists: ${safeName}` }, { status: 409 });
+        }
+        writeFileSync(filePath, body.content, "utf-8");
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ filename: safeName, content: body.content });
+      }
+
+      if (isControlRequest && url?.pathname?.startsWith("/views/files/") && req.method === "PUT") {
+        const filename = decodeURIComponent(url.pathname.slice("/views/files/".length));
+        const safeName = basename(filename);
+        if (!safeName || !/\.(ts|js)$/.test(safeName)) {
+          return Response.json({ error: "Invalid filename" }, { status: 400 });
+        }
+        const filePath = join(deps.viewsDir, safeName);
+        if (!existsSync(filePath)) {
+          return Response.json({ error: `File not found: ${safeName}` }, { status: 404 });
+        }
+        const body = yield* _(
+          parseJsonBody<{ content: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        writeFileSync(filePath, body.content, "utf-8");
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ filename: safeName, content: body.content });
+      }
+
+      if (isControlRequest && url?.pathname?.startsWith("/views/files/") && req.method === "DELETE") {
+        const filename = decodeURIComponent(url.pathname.slice("/views/files/".length));
+        const safeName = basename(filename);
+        if (!safeName || !/\.(ts|js)$/.test(safeName)) {
+          return Response.json({ error: "Invalid filename" }, { status: 400 });
+        }
+        const filePath = join(deps.viewsDir, safeName);
+        if (!existsSync(filePath)) {
+          return Response.json({ error: `File not found: ${safeName}` }, { status: 404 });
+        }
+        unlinkSync(filePath);
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ deleted: safeName });
       }
 
       if (isControlRequest && url?.pathname === "/proxy/enable" && req.method === "POST") {

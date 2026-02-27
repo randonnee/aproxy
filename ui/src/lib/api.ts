@@ -137,6 +137,47 @@ export async function setDefaultView(
   });
 }
 
+// --- View files CRUD ---
+
+export interface ViewFile {
+  filename: string;
+  content: string;
+}
+
+export async function getViewFiles(): Promise<{ files: ViewFile[] }> {
+  return fetchJson("/views/files");
+}
+
+export async function createViewFile(
+  filename: string,
+  content: string
+): Promise<ViewFile> {
+  return fetchJson("/views/files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content }),
+  });
+}
+
+export async function updateViewFile(
+  filename: string,
+  content: string
+): Promise<ViewFile> {
+  return fetchJson(`/views/files/${encodeURIComponent(filename)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function deleteViewFile(
+  filename: string
+): Promise<{ deleted: string }> {
+  return fetchJson(`/views/files/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getSimulators(): Promise<{
   simulators: SimulatorInfo[];
 }> {

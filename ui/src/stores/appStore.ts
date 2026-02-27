@@ -26,8 +26,13 @@ type ViewFilter = (context: {
 }) => boolean;
 
 export type DetailTab = "headers" | "body" | "messages";
+export type Screen = "main" | "view-manager";
 
 interface AppState {
+  // Screen navigation
+  currentScreen: Screen;
+  setCurrentScreen: (screen: Screen) => void;
+
   // Connection
   connected: boolean;
   setConnected: (val: boolean) => void;
@@ -110,6 +115,10 @@ function compileViewFilter(view: ViewDef | undefined): ViewFilter | null {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  // Screen navigation
+  currentScreen: "main",
+  setCurrentScreen: (screen) => set({ currentScreen: screen }),
+
   // Connection
   connected: false,
   setConnected: (val) => set({ connected: val }),
