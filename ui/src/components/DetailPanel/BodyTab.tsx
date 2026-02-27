@@ -1,4 +1,5 @@
 import type { ResponseEvent } from "../../lib/types";
+import { CopyBtn } from "./CopyBtn";
 
 interface Props {
   response?: ResponseEvent;
@@ -23,5 +24,10 @@ export function BodyTab({ response }: Props) {
     }
   }
 
-  return <pre className="body-viewer">{formatted}</pre>;
+  return (
+    <div className="body-wrap">
+      <CopyBtn text={formatted} title="Copy body" className="body-copy-btn" />
+      <pre className="body-viewer">{formatted}</pre>
+    </div>
+  );
 }

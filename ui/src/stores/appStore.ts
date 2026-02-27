@@ -82,6 +82,10 @@ interface AppState {
   setSimulators: (sims: SimulatorInfo[]) => void;
   updateSimulator: (udid: string, patch: Partial<SimulatorInfo>) => void;
 
+  // Copy flash
+  copiedId: string | null;
+  setCopiedId: (id: string | null) => void;
+
   // Detail panel resize
   detailHeight: number;
   setDetailHeight: (h: number) => void;
@@ -267,6 +271,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         s.udid === udid ? { ...s, ...patch } : s
       ),
     })),
+
+  // Copy flash
+  copiedId: null,
+  setCopiedId: (id) => set({ copiedId: id }),
 
   // Detail panel resize
   detailHeight: 320,

@@ -1,10 +1,12 @@
 import { useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useAppStore, type DetailTab } from "../../stores/appStore";
 import { HeadersTab } from "./HeadersTab";
 import { BodyTab } from "./BodyTab";
 import { MessagesTab } from "./MessagesTab";
 import { ResizeHandle } from "./ResizeHandle";
-import { parseUrl, formatTime, formatEntryAsText } from "../../lib/helpers";
+import { CopyBtn } from "./CopyBtn";
+import { parseUrl } from "../../lib/helpers";
 import type { RequestEvent } from "../../lib/types";
 
 const TABS: Array<{ id: DetailTab; label: string }> = [
@@ -38,27 +40,35 @@ export function DetailPanel() {
   );
 }
 
-function CopyButton() {
-  const entry = useAppStore((s) => s.getSelectedEntry());
+function ClickableUrl({ url }: { url: string }) {
+  const { host, path } = parseUrl(url);
   const [copied, setCopied] = useState(false);
+  const [toastPos, setToastPos] = useState<{ top: number; left: number } | null>(null);
 
-  const handleCopy = useCallback(() => {
-    if (!entry) return;
-    const text = formatEntryAsText(entry);
-    navigator.clipboard.writeText(text).then(() => {
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    navigator.clipboard.writeText(url).then(() => {
+      setToastPos({ top: e.clientY - 30, left: e.clientX });
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setTimeout(() => setCopied(false), 600);
     });
-  }, [entry]);
+  }, [url]);
 
   return (
-    <button
-      className={`copy-entry-btn${copied ? " copied" : ""}`}
-      onClick={handleCopy}
-      title="Copy request & response"
-    >
-      {copied ? "Copied" : "Copy"}
-    </button>
+    <>
+      <span
+        className={`pane-url clickable${copied ? " copied" : ""}`}
+        title={url}
+        onClick={handleClick}
+      >
+        {host}{path}
+      </span>
+      {copied && toastPos && createPortal(
+        <div className="copy-toast" style={{ top: toastPos.top, left: toastPos.left }}>
+          Copied
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -70,16 +80,12 @@ function RequestPane() {
   const req = entry?.request;
   if (!req) return <div className="detail-pane"><div className="detail-empty">No request data</div></div>;
 
-  const { host, path } = parseUrl(req.url);
-
   return (
     <div className="detail-pane">
       <div className="pane-header">
         <div className="pane-summary">
           <span className={`method method-${req.method}`}>{req.method}</span>
-          <span className="pane-url" title={req.url}>{host}{path}</span>
-          <span className="pane-time">{formatTime(req.timestamp)}</span>
-          <CopyButton />
+          <ClickableUrl url={req.url} />
         </div>
         <div className="detail-tabs">
           {TABS.map((tab) => (
@@ -178,5 +184,10 @@ function RequestBodyTab({ request }: { request: RequestEvent }) {
     }
   }
 
-  return <pre className="body-viewer">{formatted}</pre>;
+  return (
+    <div className="body-wrap">
+      <CopyBtn text={formatted} title="Copy body" className="body-copy-btn" />
+      <pre className="body-viewer">{formatted}</pre>
+    </div>
+  );
 }

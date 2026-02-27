@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAppStore } from "../../stores/appStore";
 import { parseUrl, formatTime, statusClass } from "../../lib/helpers";
 
@@ -23,6 +24,7 @@ export function RequestTable() {
   const requests = useAppStore((s) => s.requests);
   const selectedId = useAppStore((s) => s.selectedId);
   const selectRequest = useAppStore((s) => s.selectRequest);
+  const copiedId = useAppStore((s) => s.copiedId);
 
   const activeViewFn = useAppStore((s) => s.activeViewFn);
   const searchQuery = useAppStore((s) => s.searchQuery);
@@ -31,6 +33,7 @@ export function RequestTable() {
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const widthsRef = useRef<number[]>([]);
+  const copiedRowRef = useRef<HTMLDivElement>(null);
   const [colWidths, setColWidths] = useState<number[]>([]);
 
   const flexIndex = COLUMNS.findIndex((c) => c.initWidth === -1);
@@ -135,7 +138,19 @@ export function RequestTable() {
     return true;
   });
 
+  // Compute toast position after copiedId changes and ref is attached
+  const [toastPos, setToastPos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (copiedId && copiedRowRef.current) {
+      const rect = copiedRowRef.current.getBoundingClientRect();
+      setToastPos({ top: rect.top - 30, left: rect.left + rect.width / 2 });
+    } else {
+      setToastPos(null);
+    }
+  }, [copiedId]);
+
   return (
+    <>
     <div className="request-list-wrap" ref={wrapRef}>
       {/* Header */}
       <div className="rtable-header" style={{ gridTemplateColumns: gridTemplate }}>
@@ -183,6 +198,7 @@ export function RequestTable() {
           const rowClass = [
             "rtable-row",
             id === selectedId ? "selected" : "",
+            id === copiedId ? "copied" : "",
             mocked ? "mocked" : "",
             isWs ? "websocket" : "",
           ]
@@ -213,6 +229,7 @@ export function RequestTable() {
           return (
             <div
               key={id}
+              ref={id === copiedId ? copiedRowRef : undefined}
               className={rowClass}
               style={{ gridTemplateColumns: gridTemplate }}
               onClick={() => selectRequest(id)}
@@ -241,5 +258,12 @@ export function RequestTable() {
         </div>
       )}
     </div>
+    {copiedId && toastPos && createPortal(
+      <div className="copy-toast" key={copiedId} style={{ top: toastPos.top, left: toastPos.left }}>
+        Copied
+      </div>,
+      document.body
+    )}
+    </>
   );
 }
