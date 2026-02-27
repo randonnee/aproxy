@@ -1,0 +1,57 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- macOS squircle clip path -->
+    <clipPath id="squircle">
+      <path d="M512 0C674 0 726 0 800 18C848 30 890 50 926 80C962 110 990 150 1006 198C1024 272 1024 324 1024 512C1024 700 1024 752 1006 826C990 874 970 916 940 948C910 980 872 1006 826 1006C752 1024 700 1024 512 1024C324 1024 272 1024 198 1006C150 990 110 966 80 940C50 910 30 872 18 826C0 752 0 700 0 512C0 324 0 272 18 198C30 150 50 110 80 80C110 50 150 30 198 18C272 0 324 0 512 0Z"/>
+    </clipPath>
+
+    <!-- Background gradient - rich warm coral/salmon -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#F7807E"/>
+      <stop offset="100%" stop-color="#D94F52"/>
+    </linearGradient>
+
+    <!-- Top highlight -->
+    <linearGradient id="topShine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="white" stop-opacity="0.3"/>
+      <stop offset="30%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Border gradient -->
+    <linearGradient id="borderGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F8A0A0"/>
+      <stop offset="100%" stop-color="#B83A3D"/>
+    </linearGradient>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <!-- Colored background -->
+    <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+
+    <!-- Grid lines - white on colored background -->
+    <g stroke="white" stroke-linecap="round" opacity="0.95">
+      <!-- Vertical line left -->
+      <line x1="358" y1="60" x2="358" y2="665" stroke-width="34"/>
+      <!-- Vertical line right -->
+      <line x1="665" y1="60" x2="665" y2="964" stroke-width="34"/>
+      <!-- Horizontal line top -->
+      <line x1="665" y1="358" x2="964" y2="358" stroke-width="34"/>
+      <!-- Horizontal line bottom -->
+      <line x1="60" y1="665" x2="665" y2="665" stroke-width="34"/>
+    </g>
+
+    <!-- Small bright dots at intersections -->
+    <circle cx="665" cy="358" r="10" fill="white"/>
+    <circle cx="358" cy="665" r="10" fill="white"/>
+    <circle cx="665" cy="665" r="12" fill="white"/>
+
+    <!-- Top shine for glass depth -->
+    <rect width="1024" height="1024" fill="url(#topShine)"/>
+  </g>
+
+  <!-- Outer border for definition -->
+  <g clip-path="url(#squircle)">
+    <path d="M512 0C674 0 726 0 800 18C848 30 890 50 926 80C962 110 990 150 1006 198C1024 272 1024 324 1024 512C1024 700 1024 752 1006 826C990 874 970 916 940 948C910 980 872 1006 826 1006C752 1024 700 1024 512 1024C324 1024 272 1024 198 1006C150 990 110 966 80 940C50 910 30 872 18 826C0 752 0 700 0 512C0 324 0 272 18 198C30 150 50 110 80 80C110 50 150 30 198 18C272 0 324 0 512 0Z"
+      fill="none" stroke="url(#borderGrad)" stroke-width="2"/>
+  </g>
+</svg>

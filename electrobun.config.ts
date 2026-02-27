@@ -20,6 +20,7 @@ export default {
     watchIgnore: ["ui/dist/**"],
     mac: {
       bundleCEF: false,
+      icons: "icon.iconset",
     },
     linux: {
       bundleCEF: false,

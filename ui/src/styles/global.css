@@ -1319,6 +1319,33 @@ button.danger:hover {
   animation: fadeIn 0.2s var(--ease-out);
 }
 
+/* Copy entry button */
+.copy-entry-btn {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+  margin-left: auto;
+}
+
+.copy-entry-btn:hover {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: var(--border-accent);
+}
+
+.copy-entry-btn.copied {
+  background: var(--success-subtle);
+  color: var(--success);
+  border-color: rgba(109, 181, 83, 0.3);
+}
+
 /* ════════════════════════════════════════════
    Resize handle
    ════════════════════════════════════════════ */

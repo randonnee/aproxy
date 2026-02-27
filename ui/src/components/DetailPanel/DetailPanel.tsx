@@ -1,9 +1,10 @@
+import { useState, useCallback } from "react";
 import { useAppStore, type DetailTab } from "../../stores/appStore";
 import { HeadersTab } from "./HeadersTab";
 import { BodyTab } from "./BodyTab";
 import { MessagesTab } from "./MessagesTab";
 import { ResizeHandle } from "./ResizeHandle";
-import { parseUrl, formatTime } from "../../lib/helpers";
+import { parseUrl, formatTime, formatEntryAsText } from "../../lib/helpers";
 import type { RequestEvent } from "../../lib/types";
 
 const TABS: Array<{ id: DetailTab; label: string }> = [
@@ -37,6 +38,30 @@ export function DetailPanel() {
   );
 }
 
+function CopyButton() {
+  const entry = useAppStore((s) => s.getSelectedEntry());
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    if (!entry) return;
+    const text = formatEntryAsText(entry);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [entry]);
+
+  return (
+    <button
+      className={`copy-entry-btn${copied ? " copied" : ""}`}
+      onClick={handleCopy}
+      title="Copy request & response"
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 function RequestPane() {
   const entry = useAppStore((s) => s.getSelectedEntry());
   const reqTab = useAppStore((s) => s.reqTab);
@@ -54,6 +79,7 @@ function RequestPane() {
           <span className={`method method-${req.method}`}>{req.method}</span>
           <span className="pane-url" title={req.url}>{host}{path}</span>
           <span className="pane-time">{formatTime(req.timestamp)}</span>
+          <CopyButton />
         </div>
         <div className="detail-tabs">
           {TABS.map((tab) => (

@@ -61,25 +61,14 @@ ApplicationMenu.setApplicationMenu([
     submenu: [
       { role: "about" },
       { type: "separator" },
-      { role: "hide" },
-      { role: "hideOthers" },
-      { role: "showAll" },
       { type: "separator" },
-      { label: "Quit", role: "quit" },
+      { label: "Quit", role: "quit", accelerator: "q" },
     ],
   },
   {
     label: "Edit",
     submenu: [
-      { role: "undo" },
-      { role: "redo" },
-      { type: "separator" },
-      { role: "cut" },
       { role: "copy" },
-      { role: "paste" },
-      { role: "pasteAndMatchStyle" },
-      { role: "delete" },
-      { role: "selectAll" },
     ],
   },
 ]);
