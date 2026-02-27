@@ -9,6 +9,7 @@
     "build:ui": "bun run --cwd ui build",
     "start": "bun src/index.ts",
     "go": "bun run --cwd ui build && bun src/index.ts",
+    "bench": "bun run scripts/bench.ts",
     "desktop": "electrobun dev",
     "desktop:build": "electrobun build --env=stable"
   },

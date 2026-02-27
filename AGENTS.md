@@ -362,6 +362,36 @@ This fix is in the shared proxy pipeline, so it applies to both HTTP and MITM-in
 - Quick manual smoke test: `curl -x http://localhost:8080 https://httpbin.org/get`
 - HTTPS MITM smoke test: `curl --cacert ~/.aproxy/ca.pem -x http://localhost:8080 https://httpbin.org/get`
 
+## Benchmarking
+
+`scripts/bench.ts` measures proxy throughput with an SSE listener connected (simulating the web UI). It spins up a local upstream server, starts the proxy, connects an SSE reader, then fires load via raw TCP sockets.
+
+Run: `bun run bench [-- OPTIONS]`
+
+Options:
+
+- `--requests N` — total requests (default 2000)
+- `--concurrency N` — parallel workers (default 50)
+- `--warmup N` — warmup requests, not measured (default 100)
+- `--req-size N` — request body size in bytes, switches to POST (default 0 = GET)
+- `--res-size N` — response body size in bytes (default 0 = tiny JSON)
+- `--body-size N` — shorthand: sets both `--req-size` and `--res-size`
+- `--https` — use HTTPS via CONNECT tunnel + MITM interception
+- `--keepalive N` — reuse each CONNECT+TLS connection for N requests (default 1, only meaningful with `--https`)
+
+Examples:
+
+```bash
+bun run bench                                        # HTTP baseline, tiny GET
+bun run bench -- --concurrency 200 --requests 5000   # HTTP, high concurrency
+bun run bench -- --res-size 102400                   # HTTP, 100KB responses
+bun run bench -- --https                             # HTTPS through MITM pipeline
+bun run bench -- --https --keepalive 50              # HTTPS with connection reuse
+bun run bench -- --https --keepalive 20 --res-size 102400  # HTTPS, 100KB, keep-alive
+```
+
+The script uses `lvh.me` as the target hostname (resolves to `127.0.0.1`) because the proxy treats requests to `127.0.0.1`/`localhost` as control API requests. In HTTPS mode, it generates a temporary self-signed cert for the upstream server and runs the proxy with `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+
 ## Desktop app (Electrobun)
 
 The project uses Electrobun (not Electron) for the desktop build. Electrobun uses Bun as its runtime, so all existing networking code runs unchanged.
