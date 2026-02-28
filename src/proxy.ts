@@ -160,10 +160,14 @@ export function handleHttpProxy(
   })();
 
   return Effect.gen(function* (_) {
-    // Read request body for the event before forwarding (stream can only be consumed once)
+    // Read request body for the event before forwarding.
+    // IMPORTANT: req.clone() must be called outside the if-block.  In Bun's
+    // generator runtime, calling clone() inside a conditional corrupts the
+    // internal ReadableStream tee, causing the original req.body to become
+    // empty by the time it reaches the upstream fetch().
     let requestBodyText: string | undefined;
-    if (req.body && req.method !== "GET" && req.method !== "HEAD") {
-      const cloned = req.clone();
+    const cloned = req.clone();
+    if (cloned.body && req.method !== "GET" && req.method !== "HEAD") {
       const bodyBytes = yield* _(
         Effect.tryPromise(() => cloned.arrayBuffer()).pipe(
           Effect.catchAll(() => Effect.succeed(undefined))

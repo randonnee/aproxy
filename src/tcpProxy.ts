@@ -11,11 +11,12 @@ import { createFrameParser } from "./wsFrameParser";
  * State machine for each client connection.
  *
  * "parsing"  – accumulating the initial HTTP request line + headers
- * "body"     – headers parsed, accumulating request body bytes
+ * "body"     – headers parsed, accumulating request body bytes (Content-Length)
+ * "chunked"  – headers parsed, accumulating chunked transfer-encoding body
  * "tunnel"   – CONNECT established, bidirectional pipe active
  * "http"     – dispatched to the fetch handler
  */
-type ConnectionState = "parsing" | "body" | "tunnel" | "http";
+type ConnectionState = "parsing" | "body" | "chunked" | "tunnel" | "http";
 
 type SocketData = {
   state: ConnectionState;
@@ -35,6 +36,10 @@ type SocketData = {
   bodyBuffer?: Buffer;
   /** Expected Content-Length */
   expectedBodyLength?: number;
+  /** Raw chunked data being accumulated (undecoded, including chunk headers) */
+  chunkedRaw?: Buffer;
+  /** Decoded body chunks accumulated so far */
+  chunkedDecoded?: Buffer[];
   /** Flush overflow callback for MITM backpressure handling */
   flushOverflow?: () => void;
   /** Frame parser for client->server WebSocket messages (send direction) */
@@ -97,7 +102,7 @@ export function createTcpProxy(opts: {
         }
 
         if (socket.data.state === "body") {
-          // Accumulating body bytes
+          // Accumulating body bytes (Content-Length mode)
           socket.data.bodyBuffer = Buffer.concat([socket.data.bodyBuffer!, Buffer.from(data)]);
           if (socket.data.bodyBuffer.length >= socket.data.expectedBodyLength!) {
             socket.data.state = "http";
@@ -105,6 +110,25 @@ export function createTcpProxy(opts: {
               socket,
               socket.data.headerSection!,
               socket.data.bodyBuffer,
+              socket.data.method!,
+              socket.data.target!,
+              fetchHandler,
+              emitEvent
+            );
+          }
+          return;
+        }
+
+        if (socket.data.state === "chunked") {
+          // Accumulating chunked transfer-encoding body
+          socket.data.chunkedRaw = Buffer.concat([socket.data.chunkedRaw!, Buffer.from(data)]);
+          const result = tryDecodeChunked(socket.data.chunkedRaw);
+          if (result !== null) {
+            socket.data.state = "http";
+            handleHttpRequest(
+              socket,
+              socket.data.headerSection!,
+              result,
               socket.data.method!,
               socket.data.target!,
               fetchHandler,
@@ -159,7 +183,28 @@ export function createTcpProxy(opts: {
             ? parseInt(contentLengthHeader.split(":")[1].trim(), 10)
             : 0;
 
-          if (expectedBodyLength > 0 && bodyStart.length < expectedBodyLength) {
+          // Check for chunked transfer-encoding
+          const isChunked = headerSection.split("\r\n").some(
+            (l) => l.toLowerCase().startsWith("transfer-encoding:") &&
+              l.toLowerCase().includes("chunked")
+          );
+
+          if (isChunked) {
+            // Chunked transfer-encoding: try to decode what we have so far
+            const result = tryDecodeChunked(bodyStart);
+            if (result !== null) {
+              // Complete chunked body already arrived
+              socket.data.state = "http";
+              handleHttpRequest(socket, headerSection, result, method, target, fetchHandler, emitEvent);
+            } else {
+              // Need more data
+              socket.data.state = "chunked";
+              socket.data.headerSection = headerSection;
+              socket.data.method = method;
+              socket.data.target = target;
+              socket.data.chunkedRaw = Buffer.from(bodyStart);
+            }
+          } else if (expectedBodyLength > 0 && bodyStart.length < expectedBodyLength) {
             // Body hasn't fully arrived yet — transition to "body" state
             socket.data.state = "body";
             socket.data.headerSection = headerSection;
@@ -193,6 +238,57 @@ export function createTcpProxy(opts: {
       }
     }
   });
+}
+
+/**
+ * Try to decode a chunked transfer-encoding body from raw data.
+ *
+ * Chunked format: (<hex-size>\r\n<data>\r\n)* 0\r\n\r\n
+ *
+ * Returns the decoded body Buffer if the entire chunked body is present,
+ * or null if more data is needed.
+ */
+function tryDecodeChunked(raw: Buffer): Buffer | null {
+  const chunks: Buffer[] = [];
+  let offset = 0;
+
+  while (offset < raw.length) {
+    // Find the end of the chunk size line
+    const lineEnd = raw.indexOf("\r\n", offset);
+    if (lineEnd === -1) return null; // Need more data
+
+    const sizeLine = raw.subarray(offset, lineEnd).toString("utf-8").trim();
+    // Chunk size may include chunk extensions (;ext=val), ignore them
+    const semiIdx = sizeLine.indexOf(";");
+    const sizeHex = semiIdx >= 0 ? sizeLine.substring(0, semiIdx).trim() : sizeLine;
+    const chunkSize = parseInt(sizeHex, 16);
+
+    if (isNaN(chunkSize)) {
+      // Invalid chunk — treat as complete with what we have
+      console.error(`[tcp] invalid chunk size: "${sizeLine.substring(0, 40)}"`);
+      return Buffer.concat(chunks);
+    }
+
+    if (chunkSize === 0) {
+      // Terminal chunk — need the trailing \r\n after "0\r\n"
+      // We've consumed "0" at offset..lineEnd, lineEnd+2 is past the \r\n after "0"
+      // Now we need to skip optional trailers and the final \r\n
+      const trailerEnd = raw.indexOf("\r\n", lineEnd + 2);
+      if (trailerEnd === -1) return null; // Need more data for final CRLF
+      return Buffer.concat(chunks);
+    }
+
+    // We need: lineEnd + 2 (past \r\n) + chunkSize bytes + 2 (trailing \r\n)
+    const dataStart = lineEnd + 2;
+    const dataEnd = dataStart + chunkSize;
+    if (dataEnd + 2 > raw.length) return null; // Need more data
+
+    chunks.push(Buffer.from(raw.subarray(dataStart, dataEnd)));
+    offset = dataEnd + 2; // Skip trailing \r\n after chunk data
+  }
+
+  // Ran out of data without seeing terminal chunk
+  return null;
 }
 
 /**
@@ -240,7 +336,14 @@ async function handleHttpRequest(
 
     // Build request body
     const contentLength = headers.get("content-length");
-    const hasBody = method !== "GET" && method !== "HEAD" && contentLength && parseInt(contentLength, 10) > 0;
+    const hasBody = method !== "GET" && method !== "HEAD" && body.length > 0;
+
+    // If the body was decoded from chunked transfer-encoding, fix up headers:
+    // remove transfer-encoding (already decoded) and set the correct content-length
+    if (hasBody && !contentLength) {
+      headers.delete("transfer-encoding");
+      headers.set("content-length", body.length.toString());
+    }
 
     const request = new Request(url, {
       method,

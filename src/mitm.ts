@@ -34,14 +34,14 @@ type MitmContext = {
   fetchHandler: FetchHandler;
   /** Whether a request is currently being processed (prevents concurrent handling) */
   processing: boolean;
-  /** Parser state: "headers" = waiting for full headers, "body" = waiting for full body, "websocket" = raw piping mode */
-  state: "headers" | "body" | "websocket";
-  /** Parsed request info (set during "body" state while waiting for body bytes) */
+  /** Parser state: "headers" = waiting for full headers, "body" = waiting for full body, "chunked" = waiting for chunked body, "websocket" = raw piping mode */
+  state: "headers" | "body" | "chunked" | "websocket";
+  /** Parsed request info (set during "body" or "chunked" state while waiting for body bytes) */
   pendingRequest?: {
     method: string;
     path: string;
     headers: Headers;
-    expectedBodyLength: number;
+    expectedBodyLength: number; // 0 when in chunked mode
   };
   /** Resolve function for the current drain wait (backpressure) */
   drainResolve?: () => void;
@@ -288,6 +288,59 @@ function handleDecryptedData(
 }
 
 /**
+ * Try to decode a chunked transfer-encoding body from raw data.
+ *
+ * Chunked format: (<hex-size>\r\n<data>\r\n)* 0\r\n\r\n
+ *
+ * Returns { body, remaining } if the entire chunked body is present
+ * (remaining = unconsumed bytes after the terminal chunk), or null if more data is needed.
+ * Unlike tcpProxy's version, this returns remaining bytes because the MITM parser
+ * supports keep-alive and may have pipelined request data after the chunked body.
+ */
+function tryDecodeChunkedMitm(raw: Buffer): { body: Buffer; remaining: Buffer } | null {
+  const chunks: Buffer[] = [];
+  let offset = 0;
+
+  while (offset < raw.length) {
+    // Find the end of the chunk size line
+    const lineEnd = raw.indexOf("\r\n", offset);
+    if (lineEnd === -1) return null; // Need more data
+
+    const sizeLine = raw.subarray(offset, lineEnd).toString("utf-8").trim();
+    // Chunk size may include chunk extensions (;ext=val), ignore them
+    const semiIdx = sizeLine.indexOf(";");
+    const sizeHex = semiIdx >= 0 ? sizeLine.substring(0, semiIdx).trim() : sizeLine;
+    const chunkSize = parseInt(sizeHex, 16);
+
+    if (isNaN(chunkSize)) {
+      // Invalid chunk — treat as complete with what we have
+      console.error(`[mitm] invalid chunk size: "${sizeLine.substring(0, 40)}"`);
+      return { body: Buffer.concat(chunks), remaining: Buffer.from(raw.subarray(offset)) };
+    }
+
+    if (chunkSize === 0) {
+      // Terminal chunk — need the trailing \r\n after "0\r\n"
+      const trailerEnd = raw.indexOf("\r\n", lineEnd + 2);
+      if (trailerEnd === -1) return null; // Need more data for final CRLF
+      // Everything after trailerEnd + 2 is the next pipelined request (if any)
+      const remaining = Buffer.from(raw.subarray(trailerEnd + 2));
+      return { body: Buffer.concat(chunks), remaining };
+    }
+
+    // We need: lineEnd + 2 (past \r\n) + chunkSize bytes + 2 (trailing \r\n)
+    const dataStart = lineEnd + 2;
+    const dataEnd = dataStart + chunkSize;
+    if (dataEnd + 2 > raw.length) return null; // Need more data
+
+    chunks.push(Buffer.from(raw.subarray(dataStart, dataEnd)));
+    offset = dataEnd + 2; // Skip trailing \r\n after chunk data
+  }
+
+  // Ran out of data without seeing terminal chunk
+  return null;
+}
+
+/**
  * Try to parse and process the next request from the buffer.
  * Called after accumulation or after a previous request completes.
  */
@@ -344,6 +397,27 @@ function processNext(socket: Socket<{}>, ctx: MitmContext) {
       ? parseInt(contentLengthStr, 10)
       : 0;
 
+    // Check for chunked transfer-encoding
+    const transferEncoding = headers.get("transfer-encoding");
+    const isChunked = transferEncoding !== null && transferEncoding.toLowerCase().includes("chunked");
+
+    if (isChunked) {
+      // Try to decode what's already in the buffer
+      const result = tryDecodeChunkedMitm(ctx.buffer);
+      if (result !== null) {
+        // Complete chunked body already present — fix up headers and dispatch
+        ctx.buffer = result.remaining;
+        headers.delete("transfer-encoding");
+        headers.set("content-length", result.body.length.toString());
+        dispatchRequest(socket, ctx, method, path, headers, result.body.length, result.body);
+      } else {
+        // Need more data
+        ctx.state = "chunked";
+        ctx.pendingRequest = { method, path, headers, expectedBodyLength: 0 };
+      }
+      return;
+    }
+
     if (expectedBodyLength > 0 && ctx.buffer.length < expectedBodyLength) {
       // Need more body bytes — save parsed state and wait
       ctx.state = "body";
@@ -355,7 +429,7 @@ function processNext(socket: Socket<{}>, ctx: MitmContext) {
     dispatchRequest(socket, ctx, method, path, headers, expectedBodyLength);
 
   } else if (ctx.state === "body") {
-    // Waiting for body bytes
+    // Waiting for body bytes (Content-Length mode)
     const req = ctx.pendingRequest!;
     if (ctx.buffer.length < req.expectedBodyLength) {
       return; // Still waiting
@@ -364,6 +438,21 @@ function processNext(socket: Socket<{}>, ctx: MitmContext) {
     ctx.state = "headers";
     ctx.pendingRequest = undefined;
     dispatchRequest(socket, ctx, req.method, req.path, req.headers, req.expectedBodyLength);
+
+  } else if (ctx.state === "chunked") {
+    // Waiting for complete chunked body
+    const req = ctx.pendingRequest!;
+    const result = tryDecodeChunkedMitm(ctx.buffer);
+    if (result === null) {
+      return; // Still waiting for more chunks
+    }
+    // Got complete chunked body — fix up headers and dispatch
+    ctx.state = "headers";
+    ctx.pendingRequest = undefined;
+    ctx.buffer = result.remaining;
+    req.headers.delete("transfer-encoding");
+    req.headers.set("content-length", result.body.length.toString());
+    dispatchRequest(socket, ctx, req.method, req.path, req.headers, result.body.length, result.body);
   }
 }
 
@@ -377,14 +466,17 @@ function dispatchRequest(
   method: string,
   path: string,
   headers: Headers,
-  bodyLength: number
+  bodyLength: number,
+  preDecodedBody?: Buffer
 ) {
   const { hostname, port, fetchHandler } = ctx;
   ctx.processing = true;
 
-  // Extract body from buffer
+  // Extract body from buffer (or use pre-decoded body from chunked decoding)
   let requestBody: Uint8Array | undefined;
-  if (bodyLength > 0) {
+  if (preDecodedBody && preDecodedBody.length > 0) {
+    requestBody = new Uint8Array(preDecodedBody);
+  } else if (bodyLength > 0) {
     requestBody = new Uint8Array(ctx.buffer.subarray(0, bodyLength));
     ctx.buffer = Buffer.from(ctx.buffer.subarray(bodyLength));
   }
