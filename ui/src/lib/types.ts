@@ -14,6 +14,8 @@ export interface ResponseEvent {
   status: number;
   headers: Record<string, string>;
   body?: string;
+  bodyBase64?: string;
+  bodyEncoding?: "base64";
   durationMs: number;
   mocked?: boolean;
 }

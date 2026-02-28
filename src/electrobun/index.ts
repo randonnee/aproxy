@@ -55,21 +55,18 @@ const appWindow = new BrowserWindow({
   },
 });
 
-// Standard Edit menu for copy/paste keyboard shortcuts
+// Standard App + Edit menus for macOS shortcuts
 ApplicationMenu.setApplicationMenu([
   {
+    role: "appMenu",
     submenu: [
       { role: "about" },
       { type: "separator" },
-      { type: "separator" },
-      { label: "Quit", role: "quit", accelerator: "q" },
+      { role: "quit" },
     ],
   },
   {
-    label: "Edit",
-    submenu: [
-      { role: "copy" },
-    ],
+    role: "editMenu",
   },
 ]);
 

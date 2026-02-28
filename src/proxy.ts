@@ -40,13 +40,25 @@ export function computeProxyOutcome(
       const responseHeaders = new Headers(ruleResponse.headers);
       // Read the full body so we can include it in the event
       let bodyText: string | undefined;
+      let bodyBase64: string | undefined;
       const bodyBytes = yield* _(
         Effect.tryPromise(() => ruleResponse.clone().arrayBuffer()).pipe(
           Effect.catchAll(() => Effect.succeed(undefined))
         )
       );
       if (bodyBytes) {
-        try { bodyText = new TextDecoder().decode(bodyBytes); } catch {}
+        const contentType = responseHeaders.get("content-type") ?? responseHeaders.get("Content-Type") ?? "";
+        const normalizedType = contentType.toLowerCase();
+        const isMedia = normalizedType.startsWith("image/") || normalizedType.startsWith("video/") || normalizedType.startsWith("audio/");
+        if (isMedia) {
+          bodyBase64 = Buffer.from(bodyBytes).toString("base64");
+        } else {
+          try {
+            bodyText = new TextDecoder().decode(bodyBytes);
+          } catch {
+            bodyBase64 = Buffer.from(bodyBytes).toString("base64");
+          }
+        }
       }
       const responseEvent: ProxyEvent = {
         type: "response",
@@ -56,6 +68,8 @@ export function computeProxyOutcome(
         durationMs: Date.now() - startedAt,
         timestamp: Date.now(),
         body: bodyText,
+        bodyBase64,
+        bodyEncoding: bodyBase64 ? "base64" : undefined,
         mocked: true
       };
       return { response: ruleResponse, event: responseEvent };
@@ -111,9 +125,19 @@ export function computeProxyOutcome(
     }
     responseHeaders.set("content-length", String(bodyBytes.byteLength));
     let bodyText: string | undefined;
-    try {
-      bodyText = new TextDecoder().decode(bodyBytes);
-    } catch {}
+    let bodyBase64: string | undefined;
+    const contentType = responseHeaders.get("content-type") ?? responseHeaders.get("Content-Type") ?? "";
+    const normalizedType = contentType.toLowerCase();
+    const isMedia = normalizedType.startsWith("image/") || normalizedType.startsWith("video/") || normalizedType.startsWith("audio/");
+    if (isMedia) {
+      bodyBase64 = Buffer.from(bodyBytes).toString("base64");
+    } else {
+      try {
+        bodyText = new TextDecoder().decode(bodyBytes);
+      } catch {
+        bodyBase64 = Buffer.from(bodyBytes).toString("base64");
+      }
+    }
 
     const responseEvent: ProxyEvent = {
       type: "response",
@@ -122,7 +146,9 @@ export function computeProxyOutcome(
       headers: headersToRecord(responseHeaders),
       durationMs: Date.now() - startedAt,
       timestamp: Date.now(),
-      body: bodyText
+      body: bodyText,
+      bodyBase64,
+      bodyEncoding: bodyBase64 ? "base64" : undefined
     };
 
     return {

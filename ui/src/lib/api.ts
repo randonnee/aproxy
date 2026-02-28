@@ -6,6 +6,10 @@ import type {
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+export function getCaCertUrl(): string {
+  return `${API_BASE}/ca/cert`;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, init);
   return res.json() as Promise<T>;

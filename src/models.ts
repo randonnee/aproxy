@@ -16,6 +16,8 @@ export type ResponseEvent = {
   durationMs: number;
   timestamp: number;
   body?: string;
+  bodyBase64?: string;
+  bodyEncoding?: "base64";
   mocked?: boolean;
 };
 
