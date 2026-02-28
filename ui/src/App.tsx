@@ -6,6 +6,7 @@ import { Toolbar } from "./components/Toolbar";
 import { RequestTable } from "./components/RequestTable/RequestTable";
 import { DetailPanel } from "./components/DetailPanel/DetailPanel";
 import { ViewManager } from "./components/ViewManager/ViewManager";
+import { ScenarioManager } from "./components/ScenarioManager/ScenarioManager";
 import { useSSE } from "./hooks/useSSE";
 import { useInitialData } from "./hooks/useInitialData";
 import { useAppStore } from "./stores/appStore";
@@ -59,6 +60,17 @@ export function App() {
         <TopBar />
         <div className="main">
           <ViewManager />
+        </div>
+      </>
+    );
+  }
+
+  if (currentScreen === "scenario-manager") {
+    return (
+      <>
+        <TopBar />
+        <div className="main">
+          <ScenarioManager />
         </div>
       </>
     );

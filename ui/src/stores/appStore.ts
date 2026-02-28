@@ -26,7 +26,7 @@ type ViewFilter = (context: {
 }) => boolean;
 
 export type DetailTab = "headers" | "body" | "messages";
-export type Screen = "main" | "view-manager";
+export type Screen = "main" | "view-manager" | "scenario-manager";
 
 interface AppState {
   // Screen navigation

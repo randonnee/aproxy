@@ -4,13 +4,14 @@ import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { useAppStore } from "../../stores/appStore";
 import * as api from "../../lib/api";
-import type { ViewFile } from "../../lib/api";
+import type { ScenarioFile } from "../../lib/api";
 import rulesSource from "@aproxy/shared/rules.ts?raw";
 
-// Extract just the view-related types from the full rules source
-const VIEW_TYPES_MARKER = "// ── Views";
-const markerIdx = rulesSource.indexOf(VIEW_TYPES_MARKER);
-const viewTypesSource = markerIdx >= 0 ? rulesSource.slice(markerIdx).trimEnd() : rulesSource;
+// Extract just the scenario-related types (from start to the Views marker)
+const VIEWS_MARKER = "// ── Views";
+const viewsIdx = rulesSource.indexOf(VIEWS_MARKER);
+const scenarioTypesSource =
+  viewsIdx >= 0 ? rulesSource.slice(0, viewsIdx).trimEnd() : rulesSource;
 
 function TypeReferencePanel({ theme }: { theme: string }) {
   const [open, setOpen] = useState(false);
@@ -20,7 +21,7 @@ function TypeReferencePanel({ theme }: { theme: string }) {
       <button
         className="vm-typeref-toggle"
         onClick={() => setOpen(!open)}
-        title="Show type definitions for view files"
+        title="Show type definitions for scenario files"
       >
         <svg
           className={`vm-typeref-chevron${open ? " open" : ""}`}
@@ -40,7 +41,7 @@ function TypeReferencePanel({ theme }: { theme: string }) {
       {open && (
         <div className="vm-typeref-body">
           <CodeMirror
-            value={viewTypesSource}
+            value={scenarioTypesSource}
             readOnly
             editable={false}
             extensions={[javascript({ typescript: true })]}
@@ -61,28 +62,38 @@ function TypeReferencePanel({ theme }: { theme: string }) {
   );
 }
 
-const DEFAULT_VIEW_TEMPLATE = `import type { ViewFactory } from "../../shared/rules";
+const DEFAULT_SCENARIO_TEMPLATE = `import type { ScenarioFactory } from "../../shared/rules";
 
-export const views: ViewFactory[] = [
+export const scenarios: ScenarioFactory[] = [
   () => ({
-    id: "my-view",
-    name: "My View",
-    description: "Description of what this view filters",
-    filter: (ctx) => {
-      // Return true to include the request, false to hide it
-      // Available fields: ctx.url, ctx.method, ctx.status, ctx.headers,
-      //   ctx.responseHeaders, ctx.durationMs, ctx.mocked
-      return true;
-    },
+    id: "my-scenario",
+    name: "My Scenario",
+    description: "Description of what this scenario does",
+    rules: [
+      {
+        id: "my-rule",
+        name: "My Rule",
+        description: "Intercepts matching requests and returns a mock response",
+        handle: (ctx) => {
+          // Return null to pass through, or a Response to mock
+          // Available fields: ctx.id, ctx.url, ctx.method, ctx.headers
+          if (!/example\\.com\\/api/.test(ctx.url)) return null;
+          return new Response(
+            JSON.stringify({ mock: true }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        },
+      },
+    ],
   }),
 ];
 `;
 
-export function ViewManager() {
+export function ScenarioManager() {
   const setCurrentScreen = useAppStore((s) => s.setCurrentScreen);
   const theme = useAppStore((s) => s.theme);
 
-  const [files, setFiles] = useState<ViewFile[]>([]);
+  const [files, setFiles] = useState<ScenarioFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [editorContent, setEditorContent] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -95,11 +106,11 @@ export function ViewManager() {
 
   const loadFiles = useCallback(async () => {
     try {
-      const data = await api.getViewFiles();
+      const data = await api.getScenarioFiles();
       setFiles(data.files);
       return data.files;
     } catch {
-      setError("Failed to load view files");
+      setError("Failed to load scenario files");
       return [];
     }
   }, []);
@@ -137,21 +148,20 @@ export function ViewManager() {
     setSaving(true);
     setError(null);
     try {
-      await api.updateViewFile(selectedFile, editorContent);
+      await api.updateScenarioFile(selectedFile, editorContent);
       const updatedFiles = await loadFiles();
-      // Re-select to update the stored content
       const updated = updatedFiles.find(
-        (f: ViewFile) => f.filename === selectedFile
+        (f: ScenarioFile) => f.filename === selectedFile
       );
       if (updated) {
         setEditorContent(updated.content);
       }
       setDirty(false);
-      // Refresh the views list in the main app
-      const viewData = await api.getViews();
+      // Refresh the scenarios list in the main app
+      const scenarioData = await api.getScenarios();
       useAppStore
         .getState()
-        .setViews(viewData.views, viewData.defaultViewId);
+        .setScenarios(scenarioData.scenarios, scenarioData.activeScenarioIds);
     } catch (e: any) {
       setError(e?.message || "Failed to save file");
     } finally {
@@ -168,16 +178,16 @@ export function ViewManager() {
     setConfirmingDelete(false);
     setError(null);
     try {
-      await api.deleteViewFile(selectedFile);
+      await api.deleteScenarioFile(selectedFile);
       setSelectedFile(null);
       setEditorContent("");
       setDirty(false);
       await loadFiles();
-      // Refresh the views list in the main app
-      const viewData = await api.getViews();
+      // Refresh the scenarios list in the main app
+      const scenarioData = await api.getScenarios();
       useAppStore
         .getState()
-        .setViews(viewData.views, viewData.defaultViewId);
+        .setScenarios(scenarioData.scenarios, scenarioData.activeScenarioIds);
     } catch (e: any) {
       setError(e?.message || "Failed to delete file");
     }
@@ -189,11 +199,10 @@ export function ViewManager() {
     const filename = name.endsWith(".ts") || name.endsWith(".js") ? name : `${name}.ts`;
     setError(null);
     try {
-      await api.createViewFile(filename, DEFAULT_VIEW_TEMPLATE);
+      await api.createScenarioFile(filename, DEFAULT_SCENARIO_TEMPLATE);
       const updatedFiles = await loadFiles();
-      // Select the newly created file
       const created = updatedFiles.find(
-        (f: ViewFile) => f.filename === filename
+        (f: ScenarioFile) => f.filename === filename
       );
       if (created) {
         setSelectedFile(created.filename);
@@ -236,7 +245,7 @@ export function ViewManager() {
           </svg>
           Back
         </button>
-        <h2 className="vm-title">Manage Views</h2>
+        <h2 className="vm-title">Manage Scenarios</h2>
         <div className="vm-header-spacer" />
       </div>
 
@@ -244,7 +253,7 @@ export function ViewManager() {
         <div className="vm-file-list">
           <div className="vm-file-list-header">
             <span className="vm-file-list-title">Files</span>
-            <button className="sidebar-icon-btn" onClick={startCreating} title="New view file">
+            <button className="sidebar-icon-btn" onClick={startCreating} title="New scenario file">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M8 3v10M3 8h10" />
               </svg>
@@ -277,7 +286,7 @@ export function ViewManager() {
 
           <div className="vm-file-entries">
             {files.length === 0 && !creating && (
-              <div className="vm-file-empty">No view files</div>
+              <div className="vm-file-empty">No scenario files</div>
             )}
             {files.map((f) => (
               <div
@@ -348,10 +357,10 @@ export function ViewManager() {
                   <path d="M3 1.5A1.5 1.5 0 0 1 4.5 0h5.379a1.5 1.5 0 0 1 1.06.44l2.122 2.12A1.5 1.5 0 0 1 13.5 3.622V14.5A1.5 1.5 0 0 1 12 16H4.5A1.5 1.5 0 0 1 3 14.5V1.5Zm1.5-.25a.25.25 0 0 0-.25.25v13a.25.25 0 0 0 .25.25H12a.25.25 0 0 0 .25-.25V3.622a.25.25 0 0 0-.073-.177L10.055 1.323A.25.25 0 0 0 9.879 1.25H4.5Z" />
                 </svg>
               </div>
-              <span>Select a view file to edit</span>
+              <span>Select a scenario file to edit</span>
               {files.length === 0 && (
                 <button className="primary" onClick={startCreating}>
-                  Create your first view
+                  Create your first scenario
                 </button>
               )}
             </div>

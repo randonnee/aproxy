@@ -137,6 +137,47 @@ export async function setDefaultView(
   });
 }
 
+// --- Scenario files CRUD ---
+
+export interface ScenarioFile {
+  filename: string;
+  content: string;
+}
+
+export async function getScenarioFiles(): Promise<{ files: ScenarioFile[] }> {
+  return fetchJson("/scenarios/files");
+}
+
+export async function createScenarioFile(
+  filename: string,
+  content: string
+): Promise<ScenarioFile> {
+  return fetchJson("/scenarios/files", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content }),
+  });
+}
+
+export async function updateScenarioFile(
+  filename: string,
+  content: string
+): Promise<ScenarioFile> {
+  return fetchJson(`/scenarios/files/${encodeURIComponent(filename)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function deleteScenarioFile(
+  filename: string
+): Promise<{ deleted: string }> {
+  return fetchJson(`/scenarios/files/${encodeURIComponent(filename)}`, {
+    method: "DELETE",
+  });
+}
+
 // --- View files CRUD ---
 
 export interface ViewFile {

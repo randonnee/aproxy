@@ -1,3 +1,5 @@
+// ── Scenarios (proxy rules) ──
+
 export type RuleContext = {
   id: string;
   url: string;

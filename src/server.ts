@@ -268,6 +268,73 @@ export function createRoutes(
         return Response.json({ imported: safeName, ...deps.listRulesEvent() });
       }
 
+      // --- Scenario files CRUD ---
+
+      if (isControlRequest && url?.pathname === "/scenarios/files" && req.method === "GET") {
+        if (!existsSync(deps.scenariosDir)) mkdirSync(deps.scenariosDir, { recursive: true });
+        const files = readdirSync(deps.scenariosDir).filter((f) => /\.(ts|js)$/.test(f));
+        const result = files.map((filename) => ({
+          filename,
+          content: readFileSync(join(deps.scenariosDir, filename), "utf-8"),
+        }));
+        return Response.json({ files: result });
+      }
+
+      if (isControlRequest && url?.pathname === "/scenarios/files" && req.method === "POST") {
+        const body = yield* _(
+          parseJsonBody<{ filename: string; content: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const safeName = basename(body.filename).replace(/[^a-zA-Z0-9._-]/g, "_");
+        if (!safeName || !/\.(ts|js)$/.test(safeName)) {
+          return Response.json({ error: "Filename must end with .ts or .js" }, { status: 400 });
+        }
+        if (!existsSync(deps.scenariosDir)) mkdirSync(deps.scenariosDir, { recursive: true });
+        const filePath = join(deps.scenariosDir, safeName);
+        if (existsSync(filePath)) {
+          return Response.json({ error: `File already exists: ${safeName}` }, { status: 409 });
+        }
+        writeFileSync(filePath, body.content, "utf-8");
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ filename: safeName, content: body.content });
+      }
+
+      if (isControlRequest && url?.pathname?.startsWith("/scenarios/files/") && req.method === "PUT") {
+        const filename = decodeURIComponent(url.pathname.slice("/scenarios/files/".length));
+        const safeName = basename(filename);
+        if (!safeName || !/\.(ts|js)$/.test(safeName)) {
+          return Response.json({ error: "Invalid filename" }, { status: 400 });
+        }
+        const filePath = join(deps.scenariosDir, safeName);
+        if (!existsSync(filePath)) {
+          return Response.json({ error: `File not found: ${safeName}` }, { status: 404 });
+        }
+        const body = yield* _(
+          parseJsonBody<{ content: string }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        writeFileSync(filePath, body.content, "utf-8");
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ filename: safeName, content: body.content });
+      }
+
+      if (isControlRequest && url?.pathname?.startsWith("/scenarios/files/") && req.method === "DELETE") {
+        const filename = decodeURIComponent(url.pathname.slice("/scenarios/files/".length));
+        const safeName = basename(filename);
+        if (!safeName || !/\.(ts|js)$/.test(safeName)) {
+          return Response.json({ error: "Invalid filename" }, { status: 400 });
+        }
+        const filePath = join(deps.scenariosDir, safeName);
+        if (!existsSync(filePath)) {
+          return Response.json({ error: `File not found: ${safeName}` }, { status: 404 });
+        }
+        unlinkSync(filePath);
+        yield* _(deps.loadRules().pipe(Effect.mapError((cause) => new RequestError({ cause }))));
+        return Response.json({ deleted: safeName });
+      }
+
       if (isControlRequest && url?.pathname === "/views/import" && req.method === "POST") {
         const body = yield* _(
           parseJsonBody<{ filename: string; content: string }>(req).pipe(
