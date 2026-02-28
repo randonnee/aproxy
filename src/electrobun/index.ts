@@ -57,6 +57,7 @@ const appWindow = new BrowserWindow({
 
 ApplicationMenu.setApplicationMenu([
   {
+    label: "Aproxy",
     submenu: [
       { role: "about" },
       { type: "separator" },
