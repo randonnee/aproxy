@@ -55,18 +55,13 @@ const appWindow = new BrowserWindow({
   },
 });
 
-// Standard App + Edit menus for macOS shortcuts
 ApplicationMenu.setApplicationMenu([
   {
-    role: "appMenu",
     submenu: [
       { role: "about" },
       { type: "separator" },
-      { role: "quit" },
+      { role: "quit", accelerator: "q" }
     ],
-  },
-  {
-    role: "editMenu",
   },
 ]);
 
