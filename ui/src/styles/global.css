@@ -31,6 +31,8 @@
   --error-subtle: rgba(212, 106, 106, 0.12);
   --purple: #a882c5;
   --purple-subtle: rgba(168, 130, 197, 0.11);
+  --pink: #e26da4;
+  --pink-subtle: rgba(226, 109, 164, 0.11);
   --cyan: #22d3ee;
   --cyan-subtle: rgba(34, 211, 238, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -63,6 +65,8 @@
   --error-subtle: rgba(184, 68, 68, 0.07);
   --purple: #7650a0;
   --purple-subtle: rgba(118, 80, 160, 0.07);
+  --pink: #c44b86;
+  --pink-subtle: rgba(196, 75, 134, 0.07);
   --cyan: #0891b2;
   --cyan-subtle: rgba(8, 145, 178, 0.08);
   --shadow-sm: 0 1px 2px rgba(30, 20, 10, 0.06);
@@ -431,6 +435,7 @@ html.desktop-app .topbar {
 .scenario-item.active .scenario-checkbox {
   color: var(--accent);
 }
+
 
 /* ── Info tooltip ── */
 .info-tip {
@@ -897,15 +902,15 @@ button.danger:hover {
 
 /* Mocked row highlight */
 .rtable-row.mocked {
-  background: var(--purple-subtle);
+  background: var(--pink-subtle);
 }
 
 .rtable-row.mocked .rtable-td {
-  color: var(--purple);
+  color: var(--pink);
 }
 
 .rtable-row.mocked:hover {
-  background: rgba(168, 130, 197, 0.15);
+  background: rgba(226, 109, 164, 0.15);
 }
 
 /* Column resize handle */
@@ -1228,8 +1233,8 @@ button.danger:hover {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--purple);
-  background: var(--purple-subtle);
+  color: var(--pink);
+  background: var(--pink-subtle);
   padding: 0.1rem 0.35rem;
   border-radius: 0.2rem;
 }
