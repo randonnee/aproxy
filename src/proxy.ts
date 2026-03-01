@@ -23,7 +23,8 @@ export function computeProxyOutcome(
   req: Request,
   id: string,
   startedAt: number,
-  applyRules: (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
+  requestBodyText: string | undefined,
+  applyRules: (context: { id: string; url: string; method: string; headers: Record<string, string>; body?: string }) =>
     Effect.Effect<Response | null, ProxyError>
 ) {
   return Effect.gen(function* (_) {
@@ -32,7 +33,8 @@ export function computeProxyOutcome(
         id,
         url: req.url,
         method: req.method,
-        headers: headersToRecord(req.headers)
+        headers: headersToRecord(req.headers),
+        body: requestBodyText
       })
     );
 
@@ -164,7 +166,7 @@ export function computeProxyOutcome(
 export function handleHttpProxy(
   req: Request,
   emitEvent: (event: ProxyEvent) => void,
-  applyRules: (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
+  applyRules: (context: { id: string; url: string; method: string; headers: Record<string, string>; body?: string }) =>
     Effect.Effect<Response | null, ProxyError>
 ) {
   const id = crypto.randomUUID();
@@ -187,7 +189,7 @@ export function handleHttpProxy(
 
   return Effect.gen(function* (_) {
     // Read request body for the event before forwarding.
-    // IMPORTANT: req.clone() must be called outside the if-block.  In Bun's
+    // IMPORTANT: req.clone() must be called outside the if-block. In Bun's
     // generator runtime, calling clone() inside a conditional corrupts the
     // internal ReadableStream tee, causing the original req.body to become
     // empty by the time it reaches the upstream fetch().
@@ -218,7 +220,7 @@ export function handleHttpProxy(
     if (!isUiRequest) {
       yield* _(Effect.sync(() => console.log(`[proxy] ${req.method} ${req.url}`)));
     }
-    const outcome = yield* _(computeProxyOutcome(req, id, startedAt, applyRules));
+    const outcome = yield* _(computeProxyOutcome(req, id, startedAt, requestBodyText, applyRules));
     if (outcome.event) {
       const event = outcome.event;
       yield* _(Effect.sync(() => emitEvent(event)));

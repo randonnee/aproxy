@@ -5,6 +5,7 @@ export type RuleContext = {
   url: string;
   method: string;
   headers: Record<string, string>;
+  body?: string;
 };
 
 export type RuleHandler = (context: RuleContext) => Response | null | Promise<Response | null>;

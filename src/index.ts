@@ -141,7 +141,7 @@ const updateConfig = (patch: Partial<AproxyConfig>) => {
   saveConfig(config);
 };
 
-const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string> }) =>
+const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string>; body?: string }) =>
   Effect.gen(function* (_) {
     if (!proxyEnabled) return null;
     const activeScenarios = loadedScenarios.filter((scenario) => activeScenarioIds.includes(scenario.id));
