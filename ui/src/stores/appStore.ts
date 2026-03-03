@@ -12,8 +12,6 @@ import type {
   SimulatorInfo,
 } from "../lib/types";
 
-const MAX_REQUESTS = 500;
-
 type ViewFilter = (context: {
   id: string;
   url: string;
@@ -24,6 +22,14 @@ type ViewFilter = (context: {
   durationMs?: number;
   mocked?: boolean;
 }) => boolean;
+
+export type NetworkEvent =
+  | RequestEvent
+  | ResponseEvent
+  | ErrorEvent
+  | WebSocketOpenEvent
+  | WebSocketCloseEvent
+  | WebSocketMessageEvent;
 
 export type DetailTab = "headers" | "body" | "messages";
 export type Screen = "main" | "view-manager" | "scenario-manager";
@@ -43,6 +49,7 @@ interface AppState {
   selectedId: string | null;
   reqTab: DetailTab;
   resTab: DetailTab;
+  maxRequests: number;
 
   addRequest: (evt: RequestEvent) => void;
   updateResponse: (evt: ResponseEvent) => void;
@@ -50,10 +57,12 @@ interface AppState {
   updateWsOpen: (evt: WebSocketOpenEvent) => void;
   updateWsClose: (evt: WebSocketCloseEvent) => void;
   addWsMessage: (evt: WebSocketMessageEvent) => void;
+  applyNetworkEvents: (events: NetworkEvent[]) => void;
   selectRequest: (id: string | null) => void;
   setReqTab: (tab: DetailTab) => void;
   setResTab: (tab: DetailTab) => void;
   clearRequests: () => void;
+  setMaxRequests: (max: number) => void;
 
   // Filters
   searchQuery: string;
@@ -129,6 +138,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedId: null,
   reqTab: "headers",
   resTab: "headers",
+  maxRequests: 1000,
 
   addRequest: (evt) =>
     set((state) => {
@@ -142,11 +152,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         orderedIds = [evt.id, ...orderedIds];
       }
 
+      const maxRequests = state.maxRequests;
       // Trim
-      if (orderedIds.length > MAX_REQUESTS) {
-        const removed = orderedIds.slice(MAX_REQUESTS);
+      if (orderedIds.length > maxRequests) {
+        const removed = orderedIds.slice(maxRequests);
         removed.forEach((id) => requests.delete(id));
-        orderedIds = orderedIds.slice(0, MAX_REQUESTS);
+        orderedIds = orderedIds.slice(0, maxRequests);
       }
 
       return { requests, orderedIds };
@@ -207,6 +218,79 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { requests };
     }),
 
+  applyNetworkEvents: (events) =>
+    set((state) => {
+      if (events.length === 0) return state;
+
+      const requests = new Map(state.requests);
+      let orderedIds = state.orderedIds;
+      const orderedSet = new Set(orderedIds);
+      const addedIds: string[] = [];
+
+      for (const evt of events) {
+        switch (evt.type) {
+          case "request": {
+            const entry = requests.get(evt.id) || {};
+            requests.set(evt.id, { ...entry, request: evt });
+            if (!orderedSet.has(evt.id)) {
+              orderedSet.add(evt.id);
+              addedIds.push(evt.id);
+            }
+            break;
+          }
+          case "response": {
+            const entry = requests.get(evt.id);
+            if (entry) {
+              requests.set(evt.id, { ...entry, response: evt });
+            }
+            break;
+          }
+          case "error": {
+            const entry = requests.get(evt.id);
+            if (entry) {
+              requests.set(evt.id, { ...entry, error: evt });
+            }
+            break;
+          }
+          case "ws_open": {
+            const entry = requests.get(evt.id);
+            if (entry) {
+              requests.set(evt.id, { ...entry, wsOpen: true });
+            }
+            break;
+          }
+          case "ws_close": {
+            const entry = requests.get(evt.id);
+            if (entry) {
+              requests.set(evt.id, { ...entry, wsClosed: true });
+            }
+            break;
+          }
+          case "ws_message": {
+            const entry = requests.get(evt.id);
+            if (entry) {
+              const wsMessages = [...(entry.wsMessages || []), evt];
+              requests.set(evt.id, { ...entry, wsMessages });
+            }
+            break;
+          }
+        }
+      }
+
+      if (addedIds.length > 0) {
+        orderedIds = [...addedIds.reverse(), ...orderedIds];
+      }
+
+      const maxRequests = state.maxRequests;
+      if (orderedIds.length > maxRequests) {
+        const removed = orderedIds.slice(maxRequests);
+        removed.forEach((id) => requests.delete(id));
+        orderedIds = orderedIds.slice(0, maxRequests);
+      }
+
+      return { requests, orderedIds };
+    }),
+
   selectRequest: (id) => set({ selectedId: id }),
   setReqTab: (tab) => set({ reqTab: tab }),
   setResTab: (tab) => set({ resTab: tab }),
@@ -216,6 +300,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       requests: new Map(),
       orderedIds: [],
       selectedId: null,
+    }),
+
+  setMaxRequests: (max) =>
+    set((state) => {
+      const next = Math.max(1, Math.floor(max));
+      if (next === state.maxRequests) return state;
+      let orderedIds = state.orderedIds;
+      const requests = new Map(state.requests);
+      if (orderedIds.length > next) {
+        const removed = orderedIds.slice(next);
+        removed.forEach((id) => requests.delete(id));
+        orderedIds = orderedIds.slice(0, next);
+      }
+      return { maxRequests: next, orderedIds, requests };
     }),
 
   // Filters

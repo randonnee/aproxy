@@ -9,6 +9,7 @@ export function useInitialData() {
   const setViews = useAppStore((s) => s.setViews);
   const setSimulators = useAppStore((s) => s.setSimulators);
   const setTheme = useAppStore((s) => s.setTheme);
+  const setMaxRequests = useAppStore((s) => s.setMaxRequests);
 
   useEffect(() => {
     api
@@ -35,5 +36,9 @@ export function useInitialData() {
       .getTheme()
       .then((d) => setTheme(d.theme))
       .catch(() => {});
-  }, [setProxyEnabled, setCaTrusted, setScenarios, setViews, setSimulators, setTheme]);
+    api
+      .getConfig()
+      .then((d) => setMaxRequests(d.config.maxRequests))
+      .catch(() => {});
+  }, [setProxyEnabled, setCaTrusted, setScenarios, setViews, setSimulators, setTheme, setMaxRequests]);
 }

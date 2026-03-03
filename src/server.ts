@@ -400,6 +400,10 @@ export function createRoutes(
       }
 
       // --- Config / Theme ---
+      if (isControlRequest && url?.pathname === "/config" && req.method === "GET") {
+        return Response.json({ config: deps.getConfig() });
+      }
+
       if (isControlRequest && url?.pathname === "/config/theme" && req.method === "GET") {
         return Response.json({ theme: deps.getConfig().theme ?? "dark" });
       }

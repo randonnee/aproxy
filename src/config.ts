@@ -8,11 +8,13 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 export type AproxyConfig = {
   defaultViewId: string | null;
   theme: "light" | "dark";
+  maxRequests: number;
 };
 
 const defaults: AproxyConfig = {
   defaultViewId: null,
   theme: "dark",
+  maxRequests: 1000,
 };
 
 export function loadConfig(): AproxyConfig {
@@ -20,7 +22,11 @@ export function loadConfig(): AproxyConfig {
     if (!existsSync(CONFIG_PATH)) return { ...defaults };
     const raw = readFileSync(CONFIG_PATH, "utf-8");
     const parsed = JSON.parse(raw);
-    return { ...defaults, ...parsed };
+    const next = { ...defaults, ...parsed } as AproxyConfig;
+    if (!Number.isFinite(next.maxRequests) || next.maxRequests <= 0) {
+      next.maxRequests = defaults.maxRequests;
+    }
+    return next;
   } catch {
     return { ...defaults };
   }

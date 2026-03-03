@@ -260,3 +260,9 @@ export async function setTheme(
     body: JSON.stringify({ theme }),
   });
 }
+
+export async function getConfig(): Promise<{
+  config: { maxRequests: number; theme: "light" | "dark"; defaultViewId: string | null };
+}> {
+  return fetchJson("/config");
+}
