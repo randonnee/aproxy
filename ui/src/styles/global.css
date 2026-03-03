@@ -9,17 +9,17 @@
 /* ── Dark theme (default) ── */
 :root,
 [data-theme="dark"] {
-  --bg: #121110;
-  --bg-alt: #161514;
-  --panel: #1b1918;
-  --panel-strong: #232120;
-  --surface: #2d2a28;
-  --border: rgba(235, 225, 215, 0.07);
-  --border-strong: rgba(235, 225, 215, 0.13);
-  --border-accent: rgba(78, 140, 210, 0.3);
-  --ink: #ddd8d3;
-  --ink-muted: #9e9590;
-  --ink-faint: #6b6360;
+  --bg: #0f0e0d;
+  --bg-alt: #141312;
+  --panel: #191715;
+  --panel-strong: #201e1c;
+  --surface: #2a2624;
+  --border: rgba(245, 238, 231, 0.12);
+  --border-strong: rgba(245, 238, 231, 0.2);
+  --border-accent: rgba(98, 162, 232, 0.38);
+  --ink: #f3f0ec;
+  --ink-muted: #cbc2bc;
+  --ink-faint: #a19792;
   --accent: #6a9fd8;
   --accent-glow: rgba(106, 159, 216, 0.14);
   --accent-subtle: rgba(106, 159, 216, 0.07);
@@ -37,8 +37,8 @@
   --cyan-subtle: rgba(34, 211, 238, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
-  --scrollbar-thumb: rgba(235, 225, 215, 0.08);
-  --scrollbar-hover: rgba(235, 225, 215, 0.16);
+  --scrollbar-thumb: rgba(245, 238, 231, 0.16);
+  --scrollbar-hover: rgba(245, 238, 231, 0.26);
 }
 
 /* ── Light theme ── */
