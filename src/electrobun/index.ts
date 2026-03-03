@@ -11,6 +11,8 @@ const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 const appBundleDir = resolve("../Resources/app");
 process.env.APROXY_EXAMPLES_DIR = resolve(appBundleDir, "examples");
 
+process.env.APROXY_RULES_WORKER_PATH = resolve(appBundleDir, "bun", "ruleSandboxWorker.ts");
+
 // Mark as production unless already set — must happen before importing server
 // code so the CORS allowlist is built without dev-only origins.
 if (!process.env.NODE_ENV) {

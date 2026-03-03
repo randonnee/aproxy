@@ -32,6 +32,8 @@ try {
   await mkdir(bundleViewDir, { recursive: true });
   await cp("ui/dist/index.html", join(bundleViewDir, "index.html"));
   await cp("ui/dist/assets", join(bundleViewDir, "assets"), { recursive: true });
+  await mkdir(join("build", "dev-macos-arm64", "Aproxy-dev.app", "Contents", "Resources", "app", "bun"), { recursive: true });
+  await cp("src/ruleSandboxWorker.ts", join("build", "dev-macos-arm64", "Aproxy-dev.app", "Contents", "Resources", "app", "bun", "ruleSandboxWorker.ts"));
   console.log("Synced UI into Electrobun bundle");
 } catch {
   // Bundle dir may not exist on first build — Electrobun's copy handles it

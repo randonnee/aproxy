@@ -18,11 +18,11 @@ import {
 } from "./simulators";
 import { loadScenarios, loadViews, watchDir } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
-import { type RuleHandler } from "../shared/rules";
 import { ensureCa } from "./ca";
 import { loadConfig, saveConfig, type AproxyConfig } from "./config";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { RuleSandbox } from "./ruleSandbox";
 
 const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
@@ -34,6 +34,7 @@ let config: AproxyConfig = loadConfig();
 const aproxyDir = join(homedir(), ".aproxy");
 const scenariosDir = join(aproxyDir, "scenarios");
 const viewsDir = join(aproxyDir, "views");
+const ruleSandbox = new RuleSandbox();
 
 /**
  * Synchronously disable the host proxy settings.
@@ -148,7 +149,12 @@ const applyRules = (context: { id: string; url: string; method: string; headers:
     for (const scenario of activeScenarios) {
       for (const rule of scenario.rules) {
         const result = yield* _(
-          Effect.tryPromise(() => Promise.resolve(rule.handle(context))).pipe(
+          Effect.tryPromise(async () => {
+            const outcome = await ruleSandbox.runRule(scenario.id, rule.id, context);
+            if (outcome.error) throw new Error(outcome.error);
+            if (!outcome.response) return null;
+            return ruleSandbox.deserializeResponse(outcome.response);
+          }).pipe(
             Effect.mapError((cause) => new ProxyError({ cause }))
           )
         );
@@ -170,7 +176,13 @@ const main = Effect.gen(function* (_) {
   // Initialize the CA for MITM SSL interception
   const ca: CaCert = yield* _(ensureCa());
 
-  const loadScenariosEffect = loadScenarios(scenariosDir, setLoadedScenarios, setActiveScenarioIds);
+  const loadScenariosEffect = loadScenarios(
+    scenariosDir,
+    setLoadedScenarios,
+    () => activeScenarioIds,
+    setActiveScenarioIds,
+    ruleSandbox
+  );
   const loadViewsEffect = loadViews(viewsDir, setLoadedViews);
   const loadAllRules = Effect.all([loadScenariosEffect, loadViewsEffect], { concurrency: "unbounded" }).pipe(Effect.asVoid);
   const routes = createRoutes({

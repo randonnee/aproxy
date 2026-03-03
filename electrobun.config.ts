@@ -15,6 +15,7 @@ export default {
       "ui/dist/assets": "views/mainview/assets",
       "examples/scenarios": "examples/scenarios",
       "examples/views": "examples/views",
+      "src/ruleSandboxWorker.ts": "bun/ruleSandboxWorker.ts",
     },
     // Ignore Vite output in watch mode — HMR handles view rebuilds separately
     watchIgnore: ["ui/dist/**"],
