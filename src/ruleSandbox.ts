@@ -27,7 +27,8 @@ export class RuleSandbox {
   async start() {
     if (this.proc) return;
     const workerPath = process.env.APROXY_RULES_WORKER_PATH ?? `${import.meta.dir}/ruleSandboxWorker.ts`;
-    this.proc = Bun.spawn(["bun", workerPath], {
+    const bunPath = process.execPath || "bun";
+    this.proc = Bun.spawn([bunPath, workerPath], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "inherit",
