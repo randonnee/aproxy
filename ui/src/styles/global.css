@@ -37,8 +37,8 @@
   --cyan-subtle: rgba(34, 211, 238, 0.12);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
-  --scrollbar-thumb: rgba(245, 238, 231, 0.16);
-  --scrollbar-hover: rgba(245, 238, 231, 0.26);
+  --scrollbar-thumb: rgba(245, 238, 231, 0.3);
+  --scrollbar-hover: rgba(245, 238, 231, 0.45);
 }
 
 /* ── Light theme ── */
@@ -71,8 +71,8 @@
   --cyan-subtle: rgba(8, 145, 178, 0.08);
   --shadow-sm: 0 1px 2px rgba(30, 20, 10, 0.06);
   --shadow-md: 0 3px 12px rgba(30, 20, 10, 0.1);
-  --scrollbar-thumb: rgba(50, 40, 35, 0.1);
-  --scrollbar-hover: rgba(50, 40, 35, 0.2);
+  --scrollbar-thumb: rgba(50, 40, 35, 0.25);
+  --scrollbar-hover: rgba(50, 40, 35, 0.4);
 }
 
 /* ── Layout tokens ── */
@@ -83,6 +83,7 @@
   --toolbar-h: 2.6rem;
   --radius-sm: 0.35rem;
   --radius-md: 0.45rem;
+  --request-font-size: 0.86rem;
   --mono: "IBM Plex Mono", "Menlo", ui-monospace, monospace;
   --sans: "Outfit", system-ui, -apple-system, sans-serif;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -895,7 +896,7 @@ button.danger:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: var(--request-font-size);
   color: var(--ink-muted);
   transition: background 0.1s, color 0.1s, border-color 0.3s var(--ease-out);
 }
@@ -1153,7 +1154,7 @@ button.danger:hover {
   padding: 0.45rem 0.8rem;
   border-bottom: 1px solid var(--border);
   font-family: var(--mono);
-  font-size: 0.75rem;
+  font-size: var(--request-font-size);
   color: var(--ink-muted);
   min-height: 1.8rem;
   overflow: hidden;
@@ -1285,7 +1286,7 @@ button.danger:hover {
 
 .detail-tab {
   padding: 0.4rem 0.9rem;
-  font-size: 0.75rem;
+  font-size: var(--request-font-size);
   font-weight: 500;
   color: var(--ink-faint);
   cursor: pointer;
@@ -1308,6 +1309,7 @@ button.danger:hover {
   flex: 1;
   overflow-y: auto;
   padding: 0.65rem 0.8rem;
+  font-size: var(--request-font-size);
   animation: fadeIn 0.2s var(--ease-out);
 }
 
@@ -1325,7 +1327,7 @@ button.danger:hover {
 .headers-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--request-font-size);
   animation: fadeIn 0.2s var(--ease-out);
 }
 
@@ -1344,7 +1346,7 @@ button.danger:hover {
   padding: 0.3rem 0.65rem;
   border-bottom: 1px solid var(--border);
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: var(--request-font-size);
   transition: border-color 0.3s;
 }
 
@@ -1377,7 +1379,7 @@ button.danger:hover {
 /* Detail: body viewer */
 .body-viewer {
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: var(--request-font-size);
   color: var(--ink-muted);
   white-space: pre-wrap;
   word-break: break-all;
@@ -1484,8 +1486,8 @@ button.danger:hover {
    Scrollbar
    ════════════════════════════════════════════ */
 ::-webkit-scrollbar {
-  width: 0.4rem;
-  height: 0.4rem;
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 ::-webkit-scrollbar-track {
@@ -1494,12 +1496,15 @@ button.danger:hover {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 0.2rem;
+  border-radius: 0.45rem;
+  border: 2px solid transparent;
+  background-clip: content-box;
   transition: background 0.2s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
+  background-clip: content-box;
 }
 
 /* ════════════════════════════════════════════
@@ -1539,6 +1544,7 @@ button.danger:hover {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
   background: var(--bg);
   animation: fadeIn 0.2s var(--ease-out);
 }
@@ -1587,6 +1593,7 @@ button.danger:hover {
   flex: 1;
   display: flex;
   min-height: 0;
+  height: 100%;
 }
 
 /* File list panel */
@@ -1717,6 +1724,7 @@ button.danger:hover {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .vm-editor-toolbar {
@@ -1779,16 +1787,27 @@ button.danger:hover {
 .vm-editor-wrap {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  height: 100%;
+  overflow: auto;
 }
 
 .vm-editor-wrap .cm-editor {
-  height: 100%;
+  height: auto;
+  max-height: none;
+  display: block;
+  overflow: visible;
 }
 
 .vm-editor-wrap .cm-scroller {
   font-family: var(--mono) !important;
   font-size: 0.85rem !important;
+  height: auto;
+  overflow: visible !important;
+  overscroll-behavior: auto;
+}
+
+.vm-editor-wrap .cm-content {
+  min-height: 0;
 }
 
 /* Light theme overrides for CodeMirror */
