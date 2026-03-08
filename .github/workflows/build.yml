@@ -28,6 +28,10 @@ jobs:
         run: bunx electrobun build --env=stable
         env:
           NODE_ENV: production
+          ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+          ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
