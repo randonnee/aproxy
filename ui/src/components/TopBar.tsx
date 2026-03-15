@@ -9,6 +9,7 @@ export function TopBar() {
   const setTheme = useAppStore((s) => s.setTheme);
   const proxyEnabled = useAppStore((s) => s.proxyEnabled);
   const setProxyEnabled = useAppStore((s) => s.setProxyEnabled);
+  const connected = useAppStore((s) => s.connected);
 
   const [busy, setBusy] = useState(false);
   const [host, setHost] = useState<string | null>(null);
@@ -49,13 +50,13 @@ export function TopBar() {
       <div className="topbar-left" />
       <div className="topbar-center">
         <button
-          className={`proxy-btn ${proxyEnabled ? "active" : ""}`}
+          className={`proxy-btn ${proxyEnabled && connected ? "active" : ""}`}
           onClick={handleToggleProxy}
-          disabled={busy}
+          disabled={busy || !connected}
         >
-          <span className={`proxy-dot ${proxyEnabled ? "on" : ""}`} />
-          {proxyEnabled ? "Listening" : "Ready"}
-          {host && (
+          <span className={`proxy-dot ${proxyEnabled && connected ? "on" : ""} ${!connected ? "disconnected" : ""}`} />
+          {!connected ? "Disconnected" : proxyEnabled ? "Listening" : "Ready"}
+          {connected && host && (
             <sub className="proxy-address">on {host}:{port}</sub>
           )}
         </button>

@@ -79,9 +79,19 @@ export function createSseStream(
       controller.enqueue(`data: ${JSON.stringify(listRulesEvent())}\n\n`);
       controller.enqueue(`data: ${JSON.stringify(listViewsEvent())}\n\n`);
 
+      // Send heartbeat event every 10s so the client can detect a dead connection
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue("data: {\"type\":\"heartbeat\"}\n\n");
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 1_000);
+
       abortSignal.addEventListener(
         "abort",
         () => {
+          clearInterval(heartbeat);
           sseClients.delete(controller);
           unsubscribe();
           controller.close();

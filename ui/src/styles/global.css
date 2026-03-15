@@ -399,6 +399,10 @@ html.desktop-app .topbar {
   background: var(--success);
 }
 
+.proxy-dot.disconnected {
+  background: var(--error);
+}
+
 .proxy-btn.active {
   background: var(--success-subtle);
   color: var(--success);

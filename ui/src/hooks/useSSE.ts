@@ -7,6 +7,8 @@ import type { NetworkEvent } from "../stores/appStore";
 
 const NETWORK_FLUSH_INTERVAL_MS = 100;
 const MAX_NETWORK_BATCH = 500;
+/** Mark disconnected if no SSE event received within this window. */
+const HEARTBEAT_TIMEOUT_MS = 5_000;
 
 export function useSSE() {
   const sourceRef = useRef<EventSource | null>(null);
@@ -21,6 +23,14 @@ export function useSSE() {
 
     const networkQueue: NetworkEvent[] = [];
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetHeartbeat = () => {
+      if (heartbeatTimer) clearTimeout(heartbeatTimer);
+      heartbeatTimer = setTimeout(() => {
+        setConnected(false);
+      }, HEARTBEAT_TIMEOUT_MS);
+    };
 
     const flushNetwork = () => {
       if (flushTimer) {
@@ -35,11 +45,21 @@ export function useSSE() {
       }
     };
 
-    source.onopen = () => setConnected(true);
+    source.onopen = () => {
+      setConnected(true);
+      resetHeartbeat();
+      // Re-fetch proxy status on (re)connect in case it changed while disconnected
+      api.getProxyStatus().then((p) => {
+        useAppStore.getState().setProxyEnabled(p.enabled);
+      }).catch(() => {});
+    };
 
     source.onmessage = (msg) => {
+      resetHeartbeat();
       try {
-        const evt = JSON.parse(msg.data) as SSEEvent;
+        const raw = msg.data as string;
+        if (raw.includes('"heartbeat"')) return;
+        const evt = JSON.parse(raw) as SSEEvent;
           switch (evt.type) {
             case "request":
             case "response":
@@ -83,6 +103,7 @@ export function useSSE() {
 
     return () => {
       flushNetwork();
+      if (heartbeatTimer) clearTimeout(heartbeatTimer);
       source.close();
       sourceRef.current = null;
     };
