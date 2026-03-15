@@ -18,6 +18,9 @@ import { createFrameParser } from "./wsFrameParser";
  */
 type ConnectionState = "parsing" | "body" | "chunked" | "tunnel" | "http";
 
+/** Max bytes to buffer while waiting for upstream connect or request body (10MB) */
+const BUFFER_MAX_BYTES = 10 * 1024 * 1024;
+
 type SocketData = {
   state: ConnectionState;
   /** Raw bytes accumulated while parsing the first request */
@@ -90,8 +93,13 @@ export function createTcpProxy(opts: {
             socket.data.wsClientParser?.(data);
             peer.write(data);
           } else {
-            // Upstream not connected yet, buffer
+            // Upstream not connected yet, buffer (with size limit)
             socket.data.pendingData.push(Buffer.from(data));
+            const totalPending = socket.data.pendingData.reduce((sum, b) => sum + b.length, 0);
+            if (totalPending > BUFFER_MAX_BYTES) {
+              console.error(`[tcp] pending data exceeded ${BUFFER_MAX_BYTES} bytes, closing`);
+              socket.end();
+            }
           }
           return;
         }
@@ -104,6 +112,12 @@ export function createTcpProxy(opts: {
         if (socket.data.state === "body") {
           // Accumulating body bytes (Content-Length mode)
           socket.data.bodyBuffer = Buffer.concat([socket.data.bodyBuffer!, Buffer.from(data)]);
+          if (socket.data.bodyBuffer.length > BUFFER_MAX_BYTES) {
+            console.error(`[tcp] request body exceeded ${BUFFER_MAX_BYTES} bytes, rejecting`);
+            socket.write("HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\n\r\n");
+            socket.end();
+            return;
+          }
           if (socket.data.bodyBuffer.length >= socket.data.expectedBodyLength!) {
             socket.data.state = "http";
             handleHttpRequest(
@@ -122,6 +136,12 @@ export function createTcpProxy(opts: {
         if (socket.data.state === "chunked") {
           // Accumulating chunked transfer-encoding body
           socket.data.chunkedRaw = Buffer.concat([socket.data.chunkedRaw!, Buffer.from(data)]);
+          if (socket.data.chunkedRaw.length > BUFFER_MAX_BYTES) {
+            console.error(`[tcp] chunked request body exceeded ${BUFFER_MAX_BYTES} bytes, rejecting`);
+            socket.write("HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\n\r\n");
+            socket.end();
+            return;
+          }
           const result = tryDecodeChunked(socket.data.chunkedRaw);
           if (result !== null) {
             socket.data.state = "http";

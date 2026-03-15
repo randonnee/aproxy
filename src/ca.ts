@@ -32,8 +32,26 @@ export type HostCert = {
   certPem: string;
 };
 
-// In-memory cache of per-host leaf certs
+// In-memory cache of per-host leaf certs with LRU eviction.
+// Each entry is ~4-6KB (key + cert PEM). Cap at 500 entries (~3MB max).
+const HOST_CERT_CACHE_MAX = 500;
 const hostCertCache = new Map<string, HostCert>();
+
+/** Evict oldest entries when the cache exceeds the max size. */
+function hostCertCacheSet(hostname: string, cert: HostCert) {
+  // Delete first so re-insertion moves it to the end (Map preserves insertion order)
+  hostCertCache.delete(hostname);
+  hostCertCache.set(hostname, cert);
+
+  // Evict oldest entries if over capacity
+  if (hostCertCache.size > HOST_CERT_CACHE_MAX) {
+    const excess = hostCertCache.size - HOST_CERT_CACHE_MAX;
+    const keys = Array.from(hostCertCache.keys());
+    for (let i = 0; i < excess; i++) {
+      hostCertCache.delete(keys[i]);
+    }
+  }
+}
 
 // In-flight generation promises — prevents concurrent openssl runs for the same host
 const hostCertInflight = new Map<string, Promise<HostCert>>();
@@ -159,14 +177,19 @@ function generateCa(): Effect.Effect<void, CommandError> {
  */
 export async function getHostCert(hostname: string, ca: CaCert): Promise<HostCert> {
   const cached = hostCertCache.get(hostname);
-  if (cached) return cached;
+  if (cached) {
+    // Refresh access order for LRU: delete and re-insert so it moves to the end
+    hostCertCache.delete(hostname);
+    hostCertCache.set(hostname, cached);
+    return cached;
+  }
 
   // If another call is already generating for this host, wait for it
   const inflight = hostCertInflight.get(hostname);
   if (inflight) return inflight;
 
   const promise = generateHostCert(hostname, ca).then((cert) => {
-    hostCertCache.set(hostname, cert);
+    hostCertCacheSet(hostname, cert);
     hostCertInflight.delete(hostname);
     return cert;
   }).catch((err) => {

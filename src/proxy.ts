@@ -5,6 +5,12 @@ import { headersToRecord, stripHopByHop } from "./http";
 
 type ProxyOutcome = { response: Response; event?: ProxyEvent };
 
+/** Max response body size to include in SSE events (1MB). Larger bodies are truncated. */
+const SSE_BODY_MAX_BYTES = 1 * 1024 * 1024;
+
+/** Timeout for upstream fetch() calls (30 seconds) */
+const UPSTREAM_FETCH_TIMEOUT_MS = 30_000;
+
 export function resolveTargetUrl(req: Request) {
   return Effect.try(() => {
     if (req.url.startsWith("http://") || req.url.startsWith("https://")) {
@@ -101,7 +107,8 @@ export function computeProxyOutcome(
           method: targetRequest.method,
           headers: outgoingHeaders,
           body: targetRequest.body,
-          redirect: "manual"
+          redirect: "manual",
+          signal: AbortSignal.timeout(UPSTREAM_FETCH_TIMEOUT_MS)
         })
       ).pipe(Effect.mapError((cause) => new ProxyError({ cause })))
     );
@@ -127,10 +134,17 @@ export function computeProxyOutcome(
     responseHeaders.set("content-length", String(bodyBytes.byteLength));
     let bodyText: string | undefined;
     let bodyBase64: string | undefined;
+    let bodyTruncated: boolean | undefined;
     const contentType = responseHeaders.get("content-type") ?? responseHeaders.get("Content-Type") ?? "";
     const normalizedType = contentType.toLowerCase();
     const isMedia = normalizedType.startsWith("image/") || normalizedType.startsWith("video/") || normalizedType.startsWith("audio/");
-    if (isMedia) {
+
+    // Only include the body in SSE events if it's under the size cap.
+    // Large responses (videos, big downloads) would otherwise cause huge
+    // memory spikes from base64 encoding + JSON serialization.
+    if (bodyBytes.byteLength > SSE_BODY_MAX_BYTES) {
+      bodyTruncated = true;
+    } else if (isMedia) {
       bodyBase64 = Buffer.from(bodyBytes).toString("base64");
     } else {
       try {
@@ -149,7 +163,8 @@ export function computeProxyOutcome(
       timestamp: Date.now(),
       body: bodyText,
       bodyBase64,
-      bodyEncoding: bodyBase64 ? "base64" : undefined
+      bodyEncoding: bodyBase64 ? "base64" : undefined,
+      bodyTruncated
     };
 
     return {

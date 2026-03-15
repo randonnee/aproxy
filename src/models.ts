@@ -19,6 +19,8 @@ export type ResponseEvent = {
   bodyBase64?: string;
   bodyEncoding?: "base64";
   mocked?: boolean;
+  /** True when the body was too large to include in the SSE event */
+  bodyTruncated?: boolean;
 };
 
 export type ErrorEvent = {

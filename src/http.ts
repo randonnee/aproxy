@@ -79,7 +79,7 @@ export function createSseStream(
       controller.enqueue(`data: ${JSON.stringify(listRulesEvent())}\n\n`);
       controller.enqueue(`data: ${JSON.stringify(listViewsEvent())}\n\n`);
 
-      // Send heartbeat event every 10s so the client can detect a dead connection
+      // Send heartbeat event every 1s so the client can detect a dead connection
       const heartbeat = setInterval(() => {
         try {
           controller.enqueue("data: {\"type\":\"heartbeat\"}\n\n");
@@ -104,7 +104,14 @@ export function createSseStream(
 
 function emitSse(event: { type: string }, sseClients: Set<ReadableStreamDefaultController<string>>) {
   const payload = `data: ${JSON.stringify(event)}\n\n`;
-  for (const controller of sseClients) controller.enqueue(payload);
+  for (const controller of sseClients) {
+    try {
+      controller.enqueue(payload);
+    } catch {
+      // Controller's stream is closed — remove it so we don't keep failing
+      sseClients.delete(controller);
+    }
+  }
 }
 
 export function parseJsonBody<T>(req: Request) {

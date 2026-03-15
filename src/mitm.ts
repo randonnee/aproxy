@@ -102,6 +102,7 @@ export async function handleMitm(
   ca: CaCert,
   fetchHandler: FetchHandler
 ): Promise<void> {
+  let tlsListener: { stop(closeActiveConnections?: boolean): void } | undefined;
   try {
     // Generate a per-host certificate
     const hostCert = await getHostCert(host, ca);
@@ -118,7 +119,7 @@ export async function handleMitm(
     };
 
     // Start a local TLS listener on an ephemeral port
-    const tlsListener = Bun.listen<{}>({
+    tlsListener = Bun.listen<{}>({
       hostname: "127.0.0.1",
       port: 0, // ephemeral
       tls: {
@@ -158,14 +159,25 @@ export async function handleMitm(
     // When the client socket can't keep up, we queue bytes here
     // and flush them from the client socket's drain handler.
     let clientOverflow: Buffer[] = [];
+    let clientOverflowBytes = 0;
+    const CLIENT_OVERFLOW_MAX = 10 * 1024 * 1024; // 10MB
 
     /**
      * Write data to the client socket with backpressure handling.
      * If the client socket buffer is full, queue remaining bytes in clientOverflow.
+     * If overflow exceeds the limit, close the connection.
      */
     function writeToClient(data: Buffer | Uint8Array) {
       // If there's already overflow queued, just append (preserve ordering)
       if (clientOverflow.length > 0) {
+        clientOverflowBytes += data.length;
+        if (clientOverflowBytes > CLIENT_OVERFLOW_MAX) {
+          console.error(`[mitm] client overflow exceeded ${CLIENT_OVERFLOW_MAX} bytes for ${host}:${port}, closing`);
+          clientOverflow.length = 0;
+          clientOverflowBytes = 0;
+          clientSocket.end();
+          return;
+        }
         clientOverflow.push(Buffer.from(data));
         return;
       }
@@ -173,7 +185,9 @@ export async function handleMitm(
       const written = clientSocket.write(data);
       if (written < data.length) {
         // Partial or zero write — queue the remainder
-        clientOverflow.push(Buffer.from(data.subarray(written)));
+        const remainder = Buffer.from(data.subarray(written));
+        clientOverflow.push(remainder);
+        clientOverflowBytes += remainder.length;
       }
     }
 
@@ -192,9 +206,11 @@ export async function handleMitm(
         if (written < chunk.length) {
           // Partial write — keep remainder at front of queue
           clientOverflow[0] = Buffer.from(chunk.subarray(written));
+          clientOverflowBytes -= written;
           return;
         }
         // Fully written — remove from queue
+        clientOverflowBytes -= chunk.length;
         clientOverflow.shift();
       }
     }
@@ -229,24 +245,26 @@ export async function handleMitm(
         close(bridgeSocket) {
           bridgeSocket.data.peer?.end();
           // Clean up the TLS listener when the bridge closes
-          tlsListener.stop();
+          tlsListener!.stop();
         },
         error(bridgeSocket, error) {
           console.error(`[mitm] bridge error for ${host}:${port}:`, error?.message ?? error);
           bridgeSocket.data.peer?.end();
-          tlsListener.stop();
+          tlsListener!.stop();
         },
         connectError(_socket, error) {
           console.error(`[mitm] bridge connect failed for ${host}:${port}:`, error?.message ?? error);
           clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
           clientSocket.end();
-          tlsListener.stop();
+          tlsListener!.stop();
         },
       },
     });
 
   } catch (err: any) {
     console.error(`[mitm] failed to set up MITM for ${host}:${port}:`, err?.message ?? err);
+    // Clean up TLS listener if it was created before the failure
+    tlsListener?.stop();
     clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
     clientSocket.end();
   }
