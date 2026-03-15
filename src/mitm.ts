@@ -386,9 +386,8 @@ function processNext(socket: Socket<{}>, ctx: MitmContext) {
     const method = parts[0];
     const path = parts[1] ?? "/";
 
-    // Validate this looks like a real HTTP request line
-    const validMethods = new Set(["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"]);
-    if (!validMethods.has(method) || parts.length < 3 || !parts[2]?.startsWith("HTTP/")) {
+    // Validate this looks like a real HTTP request line (method must be uppercase alpha token)
+    if (!/^[A-Z]+$/.test(method) || parts.length < 3 || !parts[2]?.startsWith("HTTP/")) {
       console.error(`[mitm] invalid HTTP request line from ${hostname}:${port}: ${firstLine.substring(0, 80)}`);
       return;
     }
