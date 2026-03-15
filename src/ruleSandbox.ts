@@ -21,7 +21,7 @@ export class RuleSandbox {
   private buffer = "";
   private pendingLoads = new Map<string, (result: LoadResult) => void>();
   private pendingRuns = new Map<string, (result: RunResult) => void>();
-  private readonly runTimeoutMs = 500;
+  private readonly runTimeoutMs = 10_000;
   private readonly loadTimeoutMs = 2000;
 
   async start() {
