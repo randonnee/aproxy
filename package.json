@@ -9,6 +9,8 @@
     "dev:ui": "bun run --cwd ui dev",
     "build:ui": "bun run --cwd ui build",
     "start": "bun src/index.ts",
+    "start:mitm": "APROXY_BACKEND=mitmproxy bun src/index.ts",
+    "dev:mitm": "APROXY_BACKEND=mitmproxy bun --watch src/index.ts",
     "go": "bun run --cwd ui build && bun src/index.ts",
     "bench": "bun run scripts/bench.ts",
     "desktop": "bun run scripts/build-ui.ts && bun build src/electrobun/index.ts --outdir build/dev-macos-arm64/Aproxy-dev.app/Contents/Resources/app/bun --target bun && electrobun dev",

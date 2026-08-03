@@ -2,9 +2,10 @@ import { Effect } from "effect";
 import type { ProxyEvent, RulesListEvent, ViewsListEvent, SimulatorEvent } from "./models";
 import type { LoadedScenario, LoadedView } from "../shared/rules";
 import type { CaCert } from "./ca";
+import type { SerializedRuleResponse } from "./ruleSandboxTypes";
 import { EventBus } from "./eventBus";
 import { ProxyError } from "./errors";
-import { createRoutes, createServer, createSse } from "./server";
+import { createRoutes, createServer, createControlServer, createSse, type MitmBridge } from "./server";
 import {
   configureHostProxy,
   disableHostProxy,
@@ -19,28 +20,49 @@ import {
 import { loadScenarios, loadViews, watchDir } from "./rulesLoader";
 import { handleHttpProxy } from "./proxy";
 import { ensureCa } from "./ca";
-import { loadConfig, saveConfig, type AproxyConfig } from "./config";
+import { loadConfig, saveConfig, resolveProxyBackend, type AproxyConfig } from "./config";
+import { existsSync } from "node:fs";
+import {
+  MitmProxyBackend,
+  MITMPROXY_INSTALL_HINT,
+  LEGACY_MITM_PORTS,
+  resolveAddonPath,
+  resolveMitmdumpPath,
+  resolveMitmPort,
+} from "./mitmBackend";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { RuleSandbox } from "./ruleSandbox";
 
-const proxyPort = Number(process.env.PROXY_PORT ?? 8080);
+/**
+ * Control server port: serves the UI, control API and SSE stream.  With the
+ * built-in backend this is also the proxy port; with the mitmproxy backend the
+ * proxy lives on `mitmPort` instead.
+ */
+const controlPort = Number(process.env.PROXY_PORT ?? 8080);
+const mitmPort = resolveMitmPort();
+const bindHost = process.env.HOST ?? "127.0.0.1";
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
 let loadedScenarios: LoadedScenario[] = [];
 let activeScenarioIds: string[] = [];
 let loadedViews: LoadedView[] = [];
 let proxyEnabled = false;
 let config: AproxyConfig = loadConfig();
+let backend = resolveProxyBackend(config);
+/** Port clients must point their proxy settings at for the active backend. */
+let proxyPort = backend === "mitmproxy" ? mitmPort : controlPort;
 const aproxyDir = join(homedir(), ".aproxy");
 const scenariosDir = join(aproxyDir, "scenarios");
 const viewsDir = join(aproxyDir, "views");
 const ruleSandbox = new RuleSandbox();
+let mitmBackend: MitmProxyBackend | null = null;
 
 /**
  * Synchronously disable the host proxy settings.
  * Used during process shutdown when we cannot rely on async Effect execution.
  */
 function disableProxySync(): void {
+  mitmBackend?.stop();
   if (!proxyEnabled) return;
   try {
     const result = Bun.spawnSync(["route", "-n", "get", "default"], { stdout: "pipe", stderr: "pipe" });
@@ -82,6 +104,9 @@ function installShutdownHandlers(): void {
   process.on("SIGINT", () => onSignal("SIGINT"));
   process.on("SIGTERM", () => onSignal("SIGTERM"));
   process.on("SIGHUP", () => onSignal("SIGHUP"));
+  // Bun does not run signal handlers for a plain process.exit(), so make sure
+  // the mitmdump child never outlives us and keeps port 8081 bound.
+  process.on("exit", () => mitmBackend?.stop());
 }
 
 /**
@@ -93,7 +118,12 @@ function cleanupStaleProxy(): Effect.Effect<void, never> {
     Effect.flatMap((result) => {
       if (!result.enabled) return Effect.void;
       const port = result.settings["HTTPPort"] || result.settings["HTTPSPort"];
-      if (port && Number(port) === proxyPort) {
+      // Either backend's port counts — the user may have switched backends
+      // between runs, leaving the system pointed at the other one. Ports used
+      // by older versions are included so an upgrade never strands the system
+      // proxy on a port nothing listens to any more.
+      const ours = [controlPort, mitmPort, ...LEGACY_MITM_PORTS];
+      if (port && ours.includes(Number(port))) {
         console.log("Detected stale proxy settings from a previous session, disabling...");
         return disableHostProxy().pipe(Effect.asVoid);
       }
@@ -142,7 +172,17 @@ const updateConfig = (patch: Partial<AproxyConfig>) => {
   saveConfig(config);
 };
 
-const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string>; body?: string }) =>
+/**
+ * Evaluate the active scenario rules against a request and return the first
+ * matching mock, still in its serialized (transport) form.
+ */
+const applyRulesSerialized = (context: {
+  id: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+}) =>
   Effect.gen(function* (_) {
     if (!proxyEnabled) return null;
     const activeScenarios = loadedScenarios.filter((scenario) => activeScenarioIds.includes(scenario.id));
@@ -152,17 +192,19 @@ const applyRules = (context: { id: string; url: string; method: string; headers:
           Effect.tryPromise(async () => {
             const outcome = await ruleSandbox.runRule(scenario.id, rule.id, context);
             if (outcome.error) throw new Error(outcome.error);
-            if (!outcome.response) return null;
-            return ruleSandbox.deserializeResponse(outcome.response);
-          }).pipe(
-            Effect.mapError((cause) => new ProxyError({ cause }))
-          )
+            return outcome.response;
+          }).pipe(Effect.mapError((cause) => new ProxyError({ cause })))
         );
-        if (result) return result;
+        if (result) return result as SerializedRuleResponse;
       }
     }
     return null;
   });
+
+const applyRules = (context: { id: string; url: string; method: string; headers: Record<string, string>; body?: string }) =>
+  applyRulesSerialized(context).pipe(
+    Effect.map((serialized) => (serialized ? ruleSandbox.deserializeResponse(serialized) : null))
+  );
 
 const handleProxy = (req: Request) => handleHttpProxy(req, (event) => eventBus.emit(event), applyRules);
 
@@ -175,6 +217,34 @@ const main = Effect.gen(function* (_) {
 
   // Initialize the CA for MITM SSL interception
   const ca: CaCert = yield* _(ensureCa());
+
+  // Pre-flight: mitmproxy needs both an external binary and the bundled Python
+  // bridge addon. If either is missing, say why and fall back to the built-in
+  // engine — a packaging mistake must not stop the app from starting.
+  if (backend === "mitmproxy") {
+    const missing =
+      resolveMitmdumpPath() === null
+        ? `mitmdump was not found. ${MITMPROXY_INSTALL_HINT}`
+        : !existsSync(resolveAddonPath())
+          ? `bridge addon missing at ${resolveAddonPath()}. Set APROXY_MITM_ADDON to its location.`
+          : null;
+
+    if (missing !== null) {
+      console.error(`[mitmproxy] ${missing}`);
+      console.error("[mitmproxy] Falling back to the built-in proxy backend.");
+      backend = "builtin";
+      proxyPort = controlPort;
+    }
+  }
+
+  const useMitmproxy = backend === "mitmproxy";
+  const bridge: MitmBridge | undefined = useMitmproxy
+    ? {
+        token: crypto.randomUUID(),
+        emitEvent: (event) => eventBus.emit(event),
+        applyRuleMock: applyRulesSerialized,
+      }
+    : undefined;
 
   const loadScenariosEffect = loadScenarios(
     scenariosDir,
@@ -205,6 +275,9 @@ const main = Effect.gen(function* (_) {
     })),
     getConfig,
     updateConfig,
+    getProxyPort: () => proxyPort,
+    getBackend: () => backend,
+    bridge,
     enableProxy: (input) => configureHostProxy(input).pipe(
       Effect.tap(() => Effect.sync(() => { proxyEnabled = true; }))
     ),
@@ -265,7 +338,20 @@ const main = Effect.gen(function* (_) {
       ),
   });
 
-  yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
+  if (useMitmproxy) {
+    // Control plane only — mitmdump owns the proxy port.
+    yield* _(createControlServer(routes, { hostname: bindHost, port: controlPort }));
+    mitmBackend = new MitmProxyBackend({
+      host: bindHost,
+      port: mitmPort,
+      controlUrl: `http://127.0.0.1:${controlPort}`,
+      bridgeToken: bridge!.token,
+      ca,
+    });
+    yield* _(mitmBackend.start());
+  } else {
+    yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
+  }
 
   // Load rules and set up file watchers (non-blocking for proxy operation)
   yield* _(loadAllRules);
@@ -281,7 +367,12 @@ const main = Effect.gen(function* (_) {
 
   yield* _(watchDir(scenariosDir, emitReload));
   yield* _(watchDir(viewsDir, emitReload));
-  console.log(`Proxy listening on :${proxyPort} (MITM enabled)`);
+
+  if (useMitmproxy) {
+    console.log(`Control API on :${controlPort} — proxy on :${proxyPort} (mitmproxy backend)`);
+  } else {
+    console.log(`Proxy listening on :${proxyPort} (built-in backend, MITM enabled)`);
+  }
 });
 
 /** Start the proxy server (CA + TCP listener + rules + watchers). */

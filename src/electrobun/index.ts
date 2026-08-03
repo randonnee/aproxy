@@ -12,6 +12,7 @@ const appBundleDir = resolve("../Resources/app");
 process.env.APROXY_EXAMPLES_DIR = resolve(appBundleDir, "examples");
 
 process.env.APROXY_RULES_WORKER_PATH = resolve(appBundleDir, "bun", "ruleSandboxWorker.ts");
+process.env.APROXY_MITM_ADDON = resolve(appBundleDir, "python", "aproxy_addon.py");
 
 // Mark as production unless already set — must happen before importing server
 // code so the CORS allowlist is built without dev-only origins.
@@ -84,4 +85,4 @@ appWindow.on("close", () => {
   Utils.quit();
 });
 
-console.log(`[${(new Date()).toLocaleString()}]Aproxy desktop app started (proxy on :${PROXY_PORT})`);
+console.log(`[${(new Date()).toLocaleString()}]Aproxy desktop app started (control API on :${PROXY_PORT})`);

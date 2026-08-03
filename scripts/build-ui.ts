@@ -13,28 +13,29 @@ await $`bun run --cwd ui build`;
 console.log("UI build complete");
 
 // Electrobun's copy config only runs on the initial build. On subsequent
-// `electrobun dev` restarts, the bundle keeps stale content-hashed assets.
-// Sync the fresh ui/dist into the bundle directly so restarts always pick up
-// the latest build.
-const bundleViewDir = join(
+// `electrobun dev` restarts, the bundle keeps stale content-hashed assets and
+// never picks up newly-added copy entries. Sync everything the bun entry point
+// resolves at runtime directly into the bundle so restarts stay correct.
+const bundleAppDir = join(
   "build",
   "dev-macos-arm64",
   "Aproxy-dev.app",
   "Contents",
   "Resources",
-  "app",
-  "views",
-  "mainview"
+  "app"
 );
+const bundleViewDir = join(bundleAppDir, "views", "mainview");
 
 try {
   await rm(bundleViewDir, { recursive: true, force: true });
   await mkdir(bundleViewDir, { recursive: true });
   await cp("ui/dist/index.html", join(bundleViewDir, "index.html"));
   await cp("ui/dist/assets", join(bundleViewDir, "assets"), { recursive: true });
-  await mkdir(join("build", "dev-macos-arm64", "Aproxy-dev.app", "Contents", "Resources", "app", "bun"), { recursive: true });
-  await cp("src/ruleSandboxWorker.ts", join("build", "dev-macos-arm64", "Aproxy-dev.app", "Contents", "Resources", "app", "bun", "ruleSandboxWorker.ts"));
-  console.log("Synced UI into Electrobun bundle");
+  await mkdir(join(bundleAppDir, "bun"), { recursive: true });
+  await cp("src/ruleSandboxWorker.ts", join(bundleAppDir, "bun", "ruleSandboxWorker.ts"));
+  await mkdir(join(bundleAppDir, "python"), { recursive: true });
+  await cp("python/aproxy_addon.py", join(bundleAppDir, "python", "aproxy_addon.py"));
+  console.log("Synced UI, rule worker and mitmproxy addon into Electrobun bundle");
 } catch {
   // Bundle dir may not exist on first build — Electrobun's copy handles it
 }

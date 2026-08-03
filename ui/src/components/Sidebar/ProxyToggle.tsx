@@ -6,12 +6,10 @@ export function ProxyToggle() {
   const proxyEnabled = useAppStore((s) => s.proxyEnabled);
   const setProxyEnabled = useAppStore((s) => s.setProxyEnabled);
   const [busy, setBusy] = useState(false);
-  const [host, setHost] = useState<string | null>(null);
-
-  const port = window.location.port || "8080";
+  const [target, setTarget] = useState<api.ProxyTarget | null>(null);
 
   useEffect(() => {
-    api.getPreferredHost().then(setHost).catch(() => {});
+    api.getProxyTarget().then(setTarget).catch(() => {});
   }, []);
 
   const handleToggle = async () => {
@@ -21,8 +19,8 @@ export function ProxyToggle() {
         const data = await api.disableProxy();
         setProxyEnabled(data.enabled);
       } else {
-        const h = host || (await api.getPreferredHost());
-        const data = await api.enableProxy(h, Number(port));
+        const resolved = target ?? (await api.getProxyTarget());
+        const data = await api.enableProxy(resolved.host);
         setProxyEnabled(data.enabled);
       }
     } catch {
@@ -34,8 +32,8 @@ export function ProxyToggle() {
   return (
     <div className="sidebar-section">
       <div className="sidebar-title">System Proxy</div>
-      {host && (
-        <div className="proxy-address">{host}:{port}</div>
+      {target && (
+        <div className="proxy-address">{target.host}:{target.proxyPort}</div>
       )}
       <div className="proxy-toggle">
         <button

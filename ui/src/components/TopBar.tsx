@@ -12,13 +12,12 @@ export function TopBar() {
   const connected = useAppStore((s) => s.connected);
 
   const [busy, setBusy] = useState(false);
-  const [host, setHost] = useState<string | null>(null);
-  const port = window.location.port || "8080";
+  const [target, setTarget] = useState<api.ProxyTarget | null>(null);
 
   const count = orderedIds.length;
 
   useEffect(() => {
-    api.getPreferredHost().then(setHost).catch(() => { });
+    api.getProxyTarget().then(setTarget).catch(() => { });
   }, []);
 
   const handleToggleProxy = async () => {
@@ -28,8 +27,8 @@ export function TopBar() {
         const data = await api.disableProxy();
         setProxyEnabled(data.enabled);
       } else {
-        const h = host || (await api.getPreferredHost());
-        const data = await api.enableProxy(h, Number(port));
+        const resolved = target ?? (await api.getProxyTarget());
+        const data = await api.enableProxy(resolved.host);
         setProxyEnabled(data.enabled);
       }
     } catch {
@@ -56,8 +55,11 @@ export function TopBar() {
         >
           <span className={`proxy-dot ${proxyEnabled && connected ? "on" : ""} ${!connected ? "disconnected" : ""}`} />
           {!connected ? "Disconnected" : proxyEnabled ? "Listening" : "Ready"}
-          {connected && host && (
-            <sub className="proxy-address">on {host}:{port}</sub>
+          {connected && target && (
+            <sub className="proxy-address">
+              on {target.host}:{target.proxyPort}
+              {target.backend === "mitmproxy" ? " · mitmproxy" : ""}
+            </sub>
           )}
         </button>
       </div>

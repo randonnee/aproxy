@@ -20,13 +20,12 @@ export async function getProxyStatus(): Promise<{ enabled: boolean }> {
 }
 
 export async function enableProxy(
-  proxyHost: string,
-  proxyPort: number
+  proxyHost: string
 ): Promise<{ enabled: boolean }> {
   return fetchJson("/proxy/enable", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ proxyHost, proxyPort }),
+    body: JSON.stringify({ proxyHost }),
   });
 }
 
@@ -34,12 +33,27 @@ export async function disableProxy(): Promise<{ enabled: boolean }> {
   return fetchJson("/proxy/disable", { method: "POST" });
 }
 
-export async function getPreferredHost(): Promise<string> {
+export type ProxyTarget = {
+  host: string;
+  proxyPort: number;
+  backend: "builtin" | "mitmproxy";
+};
+
+/**
+ * Address clients should point their proxy settings at. The port is owned by
+ * the server because it differs per backend (the mitmproxy engine listens on
+ * its own port, separate from the control API).
+ */
+export async function getProxyTarget(): Promise<ProxyTarget> {
   try {
-    const data = await fetchJson<{ host: string }>("/host");
-    return data.host || "127.0.0.1";
+    const data = await fetchJson<Partial<ProxyTarget>>("/host");
+    return {
+      host: data.host || "127.0.0.1",
+      proxyPort: data.proxyPort ?? 8080,
+      backend: data.backend ?? "builtin",
+    };
   } catch {
-    return "127.0.0.1";
+    return { host: "127.0.0.1", proxyPort: 8080, backend: "builtin" };
   }
 }
 

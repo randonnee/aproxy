@@ -19,21 +19,86 @@ Override with env vars:
 PROXY_PORT=8888 bun run dev
 ```
 
+## Proxy backends
+
+aproxy can drive traffic through one of two interchangeable engines. Everything
+above the transport — the SSE event contract, the React UI, scenarios, views and
+the rule sandbox — is identical either way.
+
+| | `builtin` (default) | `mitmproxy` |
+|---|---|---|
+| Engine | hand-rolled `Bun.listen` TCP proxy (`tcpProxy.ts` / `mitm.ts` / `tunnel.ts`) | supervised `mitmdump` subprocess + `python/aproxy_addon.py` |
+| Ports | proxy **and** control API on `8080` | control API on `8080`, proxy on `9090` |
+| Extra install | none | `brew install mitmproxy` |
+| HTTP/2, HTTP/3, protocol edge cases | HTTP/1.1 only (ALPN pinned) | handled by mitmproxy |
+
+Select the engine with the `APROXY_BACKEND` env var (which wins over config), or
+persist it in `~/.aproxy/config.json` as `"proxyBackend"`:
+
+```bash
+bun run start:mitm                       # same as APROXY_BACKEND=mitmproxy bun run start
+APROXY_BACKEND=builtin bun run start     # force the built-in engine
+```
+
+```bash
+curl -X PUT localhost:8080/config/backend \
+  -H 'Content-Type: application/json' -d '{"backend":"mitmproxy"}'   # takes effect on restart
+```
+
+If `mitmproxy` is selected but `mitmdump` cannot be found, aproxy logs install
+instructions and falls back to the built-in engine rather than failing to start.
+
+Relevant env vars:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `APROXY_BACKEND` | config / `builtin` | `builtin` or `mitmproxy` |
+| `APROXY_MITM_PORT` | `9090` | port mitmproxy listens on |
+| `APROXY_MITMDUMP` | auto-discovered | explicit path to the `mitmdump` binary |
+| `APROXY_MITM_ADDON` | `python/aproxy_addon.py` | explicit path to the bridge addon |
+
+The UI never hardcodes the proxy port — it reads `GET /host`, which reports
+`{ host, proxyPort, backend }` for whichever engine is running.
+
+### How the mitmproxy backend works
+
+```
+client ──▶ mitmdump :9090 (aproxy_addon.py)
+                │  POST /_mitm/request   emits the request event, returns the rule decision
+                │  POST /_mitm/response  emits the response event
+                │  POST /_mitm/error | /_mitm/ws
+                ▼
+           Bun control server :8080 ──▶ SSE /events ──▶ React UI
+                                    └─▶ RuleSandbox (unchanged TS rules)
+```
+
+- Only `/_mitm/request` blocks the flow; all other events are queued onto a
+  background thread in the addon so mitmproxy's event loop is never stalled.
+- The bridge endpoints are loopback-only and gated on a per-run token
+  (`X-Aproxy-Token`) generated at startup.
+- mitmproxy reuses the **existing aproxy CA**: `mitmBackend.ts` writes the
+  combined key+cert into `~/.aproxy/mitmproxy/mitmproxy-ca.pem`, so a CA already
+  trusted on the host or an iOS simulator keeps working.
+- If the control server is unreachable, the addon logs once and passes traffic
+  through untouched instead of breaking the connection.
+
 ## Architecture
 
-The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handles both HTTP proxy requests and HTTPS CONNECT tunneling with MITM SSL decryption.
+The built-in backend runs a single raw TCP listener (`Bun.listen`) on port 8080 that handles both HTTP proxy requests and HTTPS CONNECT tunneling with MITM SSL decryption.
 
 - **HTTP requests** are parsed and dispatched through an Effect-based route handler (control routes and upstream proxy).
 - **CONNECT requests** are intercepted via MITM: an ephemeral TLS server is started with a per-host certificate signed by the auto-generated CA. Decrypted traffic flows through the same proxy/rules pipeline as HTTP and appears in the web UI. A blind tunnel fallback is used when no CA is configured.
 
 ### Backend (`src/`)
 
-- `src/index.ts` — entry point, wires dependencies
+- `src/index.ts` — entry point, wires dependencies, selects the proxy backend
 - `src/tcpProxy.ts` — raw TCP listener, HTTP parsing, CONNECT detection
 - `src/tunnel.ts` — CONNECT tunnel handler (blind TCP pipe fallback via `Bun.connect`)
 - `src/mitm.ts` — MITM tunnel handler (TLS termination, decrypted HTTP parsing, proxy pipeline reuse)
+- `src/mitmBackend.ts` — mitmproxy backend: `mitmdump` discovery, CA export, subprocess supervision
+- `python/aproxy_addon.py` — mitmproxy addon bridging flows to the control server
 - `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions
-- `src/server.ts` — route definitions (control API + proxy dispatch), CORS headers for cross-origin desktop requests
+- `src/server.ts` — route definitions (control API + proxy dispatch), the control-only `Bun.serve` server, CORS headers for cross-origin desktop requests
 - `src/proxy.ts` — HTTP proxy forwarding with rule evaluation
 - `src/http.ts` — SSE stream creation, header utilities
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config, CA trust. All functions return `Effect<T, CommandError>`
@@ -41,8 +106,8 @@ The proxy runs a single raw TCP listener (`Bun.listen`) on port 8080 that handle
 - `src/models.ts` — TypeScript event/model types
 - `src/rules.ts` — rule and view type definitions (`ScenarioFactory`, `ViewFactory`, etc.)
 - `src/rulesLoader.ts` — scenario and view file loading from separate directories, hot-reload watching
-- `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
-- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId` and `theme`
+- `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`, `MitmBackendError`
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId`, `theme` and `proxyBackend`
 - `src/ui.html` — legacy single-page web UI (fallback if React build is missing)
 
 ### Web UI (`ui/`)
@@ -356,7 +421,13 @@ bun run desktop:build
 
 The desktop app loads the UI via `views://mainview/index.html` (Electrobun's built-in protocol for bundled views) instead of from the backend HTTP server. API calls use absolute URLs (`http://127.0.0.1:8080/...`) baked in at build time via `VITE_API_BASE`. The backend includes CORS headers on all control responses to support this cross-origin setup.
 
-The DMG/app is currently **unsigned**. After copying to `/Applications`, run:
+Builds are **unsigned unless signing credentials are present in the
+environment** — `bun run desktop:build` always produces a working DMG. Set
+`ELECTROBUN_DEVELOPER_ID` to sign, plus `ELECTROBUN_APPLEID`,
+`ELECTROBUN_APPLEIDPASS` and `ELECTROBUN_TEAMID` to notarize.
+
+For an unsigned build, clear the Gatekeeper quarantine after copying to
+`/Applications`:
 
 ```bash
 xattr -cr /Applications/Aproxy.app

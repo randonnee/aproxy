@@ -1,6 +1,7 @@
 import type { RulesListEvent, ViewsListEvent, SimulatorInfo, ProxyEvent } from "./models";
 import type { CaCert } from "./ca";
-import type { AproxyConfig } from "./config";
+import type { AproxyConfig, ProxyBackend } from "./config";
+import type { SerializedRuleResponse } from "./ruleSandboxTypes";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
 import { existsSync, readFileSync, readdirSync, copyFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
@@ -114,6 +115,42 @@ export function createServer(
   ).pipe(Effect.mapError((cause) => new RequestError({ cause })));
 }
 
+/**
+ * Create the control-plane HTTP server used when the proxying itself is handled
+ * by an external engine (mitmproxy). This serves the UI, the control API, the
+ * SSE stream and the `/_mitm/*` bridge endpoints — but never proxies traffic,
+ * so a plain `Bun.serve` is enough (no raw sockets / CONNECT support needed).
+ */
+export function createControlServer(
+  routes: (req: Request) => Effect.Effect<Response, never>,
+  options: { hostname: string; port: number }
+) {
+  return Effect.try(() =>
+    Bun.serve({
+      hostname: options.hostname,
+      port: options.port,
+      // SSE clients are long-lived; the 1s heartbeat keeps them under this cap.
+      idleTimeout: 60,
+      fetch: (req) => Effect.runPromise(routes(req)),
+    })
+  ).pipe(Effect.mapError((cause) => new RequestError({ cause })));
+}
+
+/** Bridge callbacks used by the mitmproxy backend's `/_mitm/*` endpoints. */
+export type MitmBridge = {
+  /** Shared secret the addon must present in `X-Aproxy-Token`. */
+  token: string;
+  emitEvent: (event: ProxyEvent) => void;
+  /** Evaluate the active rules and return a mock response, if any. */
+  applyRuleMock: (context: {
+    id: string;
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body?: string;
+  }) => Effect.Effect<SerializedRuleResponse | null, unknown>;
+};
+
 export function createRoutes(
   deps: {
     listRulesEvent: () => RulesListEvent;
@@ -147,6 +184,12 @@ export function createRoutes(
     trustCaOnHost: () => Effect.Effect<{ trusted: boolean; certPath: string }, CommandError>;
     isCaTrusted: () => Effect.Effect<boolean, never>;
     installCaOnSimulator: (udid: string) => Effect.Effect<SimulatorInfo, CommandError>;
+    /** Port clients should point their proxy settings at. */
+    getProxyPort: () => number;
+    /** Which proxy engine is currently serving traffic. */
+    getBackend: () => ProxyBackend;
+    /** Present only when the mitmproxy backend is active. */
+    bridge?: MitmBridge;
   }
 ) {
   const controlHosts = listLocalHosts();
@@ -173,6 +216,46 @@ export function createRoutes(
       const urlHost = url?.hostname ?? "";
       const isControlRequest = isControlHost && controlHosts.has(urlHost || hostOnly);
       _isControlRequest = isControlRequest;
+
+      // --- mitmproxy bridge (loopback only, token-gated) ---
+      // Handled before logging: these fire once or twice per proxied request
+      // and would otherwise drown the incoming-request log.
+      if (isControlRequest && url?.pathname.startsWith("/_mitm/") && req.method === "POST") {
+        const bridge = deps.bridge;
+        if (!bridge) return new Response("Bridge disabled", { status: 404 });
+        if (req.headers.get("x-aproxy-token") !== bridge.token) {
+          return new Response("Forbidden", { status: 403 });
+        }
+
+        const payload = yield* _(
+          parseJsonBody<any>(req).pipe(Effect.mapError((cause) => new RequestError({ cause })))
+        );
+
+        if (url.pathname === "/_mitm/request") {
+          bridge.emitEvent(payload as ProxyEvent);
+          const mock = yield* _(
+            bridge.applyRuleMock({
+              id: payload.id,
+              url: payload.url,
+              method: payload.method,
+              headers: payload.headers ?? {},
+              body: payload.body,
+            }).pipe(
+              Effect.catchAll((error) =>
+                Effect.sync(() => {
+                  console.error(`[mitm bridge] rule evaluation failed: ${String(error)}`);
+                  return null;
+                })
+              )
+            )
+          );
+          return Response.json({ mock });
+        }
+
+        // response / error / ws are fire-and-forget event forwards
+        bridge.emitEvent(payload as ProxyEvent);
+        return new Response(null, { status: 204 });
+      }
 
       yield* _(
         Effect.sync(() =>
@@ -211,7 +294,11 @@ export function createRoutes(
       }
 
       if (isControlRequest && url?.pathname === "/host" && req.method === "GET") {
-        return Response.json({ host: getPreferredHost() });
+        return Response.json({
+          host: getPreferredHost(),
+          proxyPort: deps.getProxyPort(),
+          backend: deps.getBackend(),
+        });
       }
 
       if (isControlRequest && url?.pathname === "/scenarios" && req.method === "GET") {
@@ -419,6 +506,22 @@ export function createRoutes(
         return Response.json({ theme: deps.getConfig().theme });
       }
 
+      if (isControlRequest && url?.pathname === "/config/backend" && req.method === "PUT") {
+        const body = yield* _(
+          parseJsonBody<{ backend: ProxyBackend }>(req).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
+        );
+        const requested: ProxyBackend = body.backend === "mitmproxy" ? "mitmproxy" : "builtin";
+        deps.updateConfig({ proxyBackend: requested });
+        // The engine is chosen at boot, so the change only takes effect on restart.
+        return Response.json({
+          proxyBackend: requested,
+          activeBackend: deps.getBackend(),
+          restartRequired: requested !== deps.getBackend(),
+        });
+      }
+
       // --- Views (custom filters) ---
       if (isControlRequest && url?.pathname === "/views" && req.method === "GET") {
         return Response.json({
@@ -509,12 +612,16 @@ export function createRoutes(
 
       if (isControlRequest && url?.pathname === "/proxy/enable" && req.method === "POST") {
         const body = yield* _(
-          parseJsonBody<{ proxyHost: string; proxyPort: number }>(req).pipe(
+          parseJsonBody<{ proxyHost: string; proxyPort?: number }>(req).pipe(
             Effect.mapError((cause) => new RequestError({ cause }))
           )
         );
+        // The server owns the port: it differs between backends, and a stale UI
+        // build must not be able to point the system proxy somewhere dead.
         const result = yield* _(
-          deps.enableProxy(body).pipe(Effect.mapError((cause) => new RequestError({ cause })))
+          deps.enableProxy({ proxyHost: body.proxyHost, proxyPort: deps.getProxyPort() }).pipe(
+            Effect.mapError((cause) => new RequestError({ cause }))
+          )
         );
         return Response.json(result);
       }
@@ -530,7 +637,7 @@ export function createRoutes(
         const result = yield* _(
           deps.proxyStatus().pipe(Effect.mapError((cause) => new RequestError({ cause })))
         );
-        return Response.json(result);
+        return Response.json({ ...result, backend: deps.getBackend(), proxyPort: deps.getProxyPort() });
       }
 
       if (isControlRequest && url?.pathname === "/simulators" && req.method === "GET") {

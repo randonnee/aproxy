@@ -16,12 +16,13 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 
 ### Backend (`src/`)
 
-- `src/index.ts` — entry point, wires dependencies together
+- `src/index.ts` — entry point, wires dependencies together, selects the proxy backend
 - `src/tcpProxy.ts` — raw TCP listener (`Bun.listen`), HTTP request parsing, CONNECT detection and dispatch
 - `src/tunnel.ts` — CONNECT tunnel handler, bidirectional TCP piping via `Bun.connect` (blind fallback, no events emitted)
 - `src/mitm.ts` — MITM tunnel handler, TLS termination via ephemeral `Bun.listen` TLS server, decrypted HTTP parsing, proxy pipeline reuse
+- `src/mitmBackend.ts` — mitmproxy backend: `mitmdump` discovery, CA export into mitmproxy's confdir, subprocess supervision
 - `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions, in-memory caching
-- `src/server.ts` — route definitions (control API + proxy dispatch), CORS headers for cross-origin desktop requests, `createServer` wraps `createTcpProxy`
+- `src/server.ts` — route definitions (control API + proxy dispatch), `createControlServer` (`Bun.serve`, used by the mitmproxy backend), `/_mitm/*` bridge endpoints, CORS headers for cross-origin desktop requests, `createServer` wraps `createTcpProxy`
 - `src/proxy.ts` — HTTP proxy forwarding logic with rule evaluation
 - `src/http.ts` — SSE stream creation, hop-by-hop header stripping, header utilities
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config (`networksetup`), CA trust on host. All functions return `Effect<T, CommandError>`
@@ -29,9 +30,13 @@ Build a macOS proxying tool (like Proxyman/Charles) with a Bun-based core that c
 - `src/models.ts` — TypeScript event and model types
 - `src/rules.ts` — rule and view type definitions (`ScenarioFactory`, `ViewFactory`, etc.)
 - `src/rulesLoader.ts` — scenario and view file loading from separate directories, hot-reload watching
-- `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`
-- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId` and `theme`
+- `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`, `MitmBackendError`
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId`, `theme` and `proxyBackend`
 - `src/ui.html` — legacy single-page web UI (fallback if React build is missing)
+
+### mitmproxy bridge (`python/`)
+
+- `python/aproxy_addon.py` — mitmproxy addon loaded into `mitmdump`; forwards flows to the Bun control server over `/_mitm/*`
 
 ### Web UI (`ui/`)
 
@@ -70,9 +75,10 @@ The web UI is a React + TypeScript app built with Vite, served from `ui/dist/` b
 
 - `~/.aproxy/ca.pem` — auto-generated CA certificate
 - `~/.aproxy/ca-key.pem` — CA private key
-- `~/.aproxy/config.json` — user config (defaultViewId, theme)
+- `~/.aproxy/config.json` — user config (defaultViewId, theme, maxRequests, proxyBackend)
 - `~/.aproxy/scenarios/` — user scenario files (loaded at runtime)
 - `~/.aproxy/views/` — user view files (loaded at runtime)
+- `~/.aproxy/mitmproxy/` — mitmproxy confdir, seeded with the aproxy CA (mitmproxy backend only)
 
 ## Development constraints
 
@@ -102,13 +108,157 @@ Keep this contract stable unless the user explicitly asks to change it.
 
 ## Server architecture
 
-The server uses a **raw TCP listener** (`Bun.listen` in `src/tcpProxy.ts`) on a single port. Incoming connections go through a state machine:
+aproxy ships **two interchangeable proxy backends**. Everything above the
+transport — the SSE event contract, the React UI, scenarios, views and the rule
+sandbox — is identical either way. See "Proxy backends" below.
+
+The default (`builtin`) backend uses a **raw TCP listener** (`Bun.listen` in `src/tcpProxy.ts`) on a single port. Incoming connections go through a state machine:
 
 1. **Parsing** — accumulate bytes until full HTTP headers arrive
 2. **CONNECT** — if a CA is configured, dispatch to `handleMitm` (MITM SSL interception); otherwise fall back to blind tunnel via `src/tunnel.ts`
 3. **HTTP** — construct a `Request` object, pass to the Effect-based route handler, serialize the `Response` back as raw HTTP
 
 This design was chosen because `Bun.serve` does not expose raw sockets, which are required for CONNECT tunneling.
+
+## Proxy backends
+
+| | `builtin` (default) | `mitmproxy` |
+|---|---|---|
+| Engine | `tcpProxy.ts` / `mitm.ts` / `tunnel.ts` | supervised `mitmdump` subprocess + `python/aproxy_addon.py` |
+| Ports | proxy **and** control API on `PROXY_PORT` (8080) | control API on `PROXY_PORT`, proxy on `APROXY_MITM_PORT` (9090) |
+| Server | `createServer` → `createTcpProxy` | `createControlServer` → `Bun.serve` (control plane only) |
+| Extra install | none | `brew install mitmproxy` |
+
+Selection happens once at boot in `src/index.ts` via `resolveProxyBackend()`:
+`APROXY_BACKEND` (`builtin` \| `mitmproxy`) wins over `config.proxyBackend` in
+`~/.aproxy/config.json`. `PUT /config/backend` persists the choice and reports
+`restartRequired`. If `mitmproxy` is selected but either `mitmdump` or the
+Python bridge addon is missing, `index.ts` logs why and falls back to `builtin`
+rather than failing to start.
+
+`mitmdump` discovery must not rely on `PATH` alone. A GUI-launched macOS app
+inherits launchd's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), which excludes
+Homebrew — `Bun.which("mitmdump")` returns `null` inside the desktop app even
+when the binary is installed. `FALLBACK_BINARY_PATHS` in `src/mitmBackend.ts`
+exists for that case; don't remove it.
+
+Because the proxy port differs per backend, **the UI must never hardcode it**.
+`GET /host` returns `{ host, proxyPort, backend }` and `POST /proxy/enable`
+ignores any client-supplied port, using `deps.getProxyPort()` instead.
+
+Environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PROXY_PORT` | `8080` | control API port (also the proxy port on `builtin`) |
+| `APROXY_BACKEND` | config, else `builtin` | `builtin` or `mitmproxy` |
+| `APROXY_MITM_PORT` | `9090` | port `mitmdump` listens on |
+| `APROXY_MITMDUMP` | auto-discovered | explicit path to the `mitmdump` binary |
+| `APROXY_MITM_ADDON` | `python/aproxy_addon.py` | explicit path to the bridge addon (set by the Electrobun entry point, since the bundle layout differs) |
+
+### mitmproxy data flow
+
+```
+client ──▶ mitmdump :9090 (aproxy_addon.py)
+                │  POST /_mitm/request   emits the request event, returns the rule decision
+                │  POST /_mitm/response  emits the response event
+                │  POST /_mitm/error | /_mitm/ws
+                ▼
+           Bun control server :8080 ──▶ SSE /events ──▶ React UI
+                                    └─▶ RuleSandbox (unchanged TS rules)
+```
+
+- `/_mitm/request` does double duty: it emits the `request` event **and** returns
+  the rule decision (`{"mock": null}` or a `SerializedRuleResponse`). Folding
+  both into one call keeps it to a single round-trip per request and guarantees
+  the `request` event is emitted before the matching `response` event.
+- All other events are queued onto a single background thread in the addon, so
+  ordering is preserved without stalling mitmproxy's asyncio loop.
+- The endpoints are loopback-only and gated on a per-run token
+  (`X-Aproxy-Token`) generated at startup and passed to the addon via env.
+- Bridge requests are handled before the `[incoming]` log line so they don't
+  drown the control-request log.
+- If the control server is unreachable the addon logs once and passes traffic
+  through untouched — a broken bridge must never break browsing.
+
+### Why the proxy port is 9090, not 8081
+
+The obvious default (`PROXY_PORT + 1` = 8081) is **React Native Metro's default
+port**. Binding it caused two problems on a normal iOS-development machine:
+
+1. aproxy stole the port from Metro, breaking `react-native start`.
+2. Every RN app on the host — including inside iOS simulators, which aproxy
+   explicitly targets — polls `localhost:8081/inspector/device` roughly once a
+   second. Those are origin-form requests addressed to the proxy itself, which
+   mitmproxy cannot forward, so each poll produced a `request` event plus a
+   "Request destination unknown" `error` event and swamped the UI.
+
+`_is_self_addressed()` in the addon is the general defence: any request whose
+destination is the proxy's own host:port is answered with `421 Misdirected
+Request` and **not** reported as traffic (the flow is tagged
+`aproxy_ignore`, which the `response` and `error` hooks honour). The addon logs
+once per path so the cause is still discoverable. Requests to *other* localhost
+ports proxy normally — only the proxy's own address is special-cased.
+
+`LEGACY_MITM_PORTS` in `src/index.ts` keeps 8081 in the stale-proxy cleanup list
+so upgrading from an older build never leaves the system proxy pointed at a port
+nothing listens on.
+
+### mitmproxy CA
+
+`seedMitmConfdir()` writes the aproxy root CA (key + cert concatenated) to
+`~/.aproxy/mitmproxy/mitmproxy-ca.pem` and passes `--set confdir=` to mitmdump.
+mitmproxy derives its remaining cert files from that. This means a CA already
+trusted on the host keychain or an iOS simulator keeps working when switching
+backends — do not let mitmproxy generate its own CA.
+
+### mitmproxy caveats
+
+- **`stream_large_bodies=0` means "stream everything", not "disable streaming".**
+  Setting it discards `flow.request.content` / `flow.response.content`, so
+  bodies silently vanish from events. Leave the option unset.
+- **`flow_detail=0` silences *all* mitmdump runtime logging**, including the
+  stdlib `logging` bridge, regardless of `termlog_verbosity`. Startup errors
+  still print. That's why the addon writes diagnostics straight to `sys.stderr`
+  via `_log()` instead of using `logging`.
+- **`from mitmproxy import http` shadows the stdlib `http` package.** Import
+  submodules by name (`from http.client import HTTPConnection`), never
+  `import http.client`.
+- **The addon's stderr is a pipe to the supervisor, so it breaks when the
+  supervisor dies.** `_log()` swallows exceptions for exactly this reason —
+  an unguarded `print` raises `BrokenPipeError` and silently kills whichever
+  thread called it (this defeated the shutdown watchdog on the first attempt).
+
+### Keeping mitmdump from outliving aproxy
+
+`mitmdump` is a child process holding the proxy port, and the system proxy
+points at it. Orphaning it means the next launch can't bind the port and the
+user's traffic goes to a proxy with no control server. Two independent
+mechanisms prevent that, and **both are required**:
+
+1. `installShutdownHandlers()` in `src/index.ts` calls `mitmBackend.stop()` from
+   the signal handlers *and* from `process.on("exit")`, because Bun does not run
+   signal handlers on a plain `process.exit()`.
+2. `_watch_parent()` in the addon polls `os.getppid()` on a daemon thread and
+   calls `os._exit(0)` once it reparents to launchd. This is the only thing that
+   covers `SIGKILL`, a crash, or a host runtime that swallows signals — which
+   Electrobun does: killing the packaged app's Bun process leaves JS handlers
+   unrun, and mitmdump survived until the watchdog was added.
+
+When touching shutdown, verify with `kill -9` on the parent, not just Ctrl-C.
+
+### Desktop bundle packaging
+
+Anything the Electrobun entry point resolves at runtime must be listed **twice**:
+
+- in `build.copy` in `electrobun.config.ts` (used by `electrobun build`), and
+- in `scripts/build-ui.ts` (used by `bun run desktop`)
+
+Electrobun's `copy` config only runs on the *initial* build, so `electrobun dev`
+silently keeps a stale bundle and never picks up newly-added copy entries. That
+is why `scripts/build-ui.ts` hand-syncs `views/mainview`, `bun/ruleSandboxWorker.ts`
+and `python/aproxy_addon.py`. Forgetting the second half means the app runs fine
+from source and breaks only in the desktop build.
 
 ## MITM SSL interception
 
@@ -358,9 +508,25 @@ This fix is in the shared proxy pipeline, so it applies to both HTTP and MITM-in
 
 ## Testing
 
-- There are no tests yet; if adding, prefer lightweight smoke tests.
-- Quick manual smoke test: `curl -x http://localhost:8080 https://httpbin.org/get`
-- HTTPS MITM smoke test: `curl --cacert ~/.aproxy/ca.pem -x http://localhost:8080 https://httpbin.org/get`
+- `bun test` runs the suite. Prefer lightweight, focused tests.
+  - `src/proxy.test.ts` — integration tests for the built-in backend (real TCP
+    listener, real CA, raw-socket clients against local upstreams)
+  - `src/mitmBackend.test.ts` — backend selection, `mitmdump` discovery, CA
+    export and the `/_mitm/*` bridge endpoints (does not require mitmproxy)
+- Built-in backend smoke test: `curl -x http://localhost:8080 https://httpbin.org/get`
+- Built-in HTTPS MITM smoke test: `curl --cacert ~/.aproxy/ca.pem -x http://localhost:8080 https://httpbin.org/get`
+- mitmproxy backend smoke test (proxy is on 9090, control API stays on 8080):
+
+  ```bash
+  bun run start:mitm
+  curl -x http://localhost:9090 http://httpbin.org/get
+  curl --cacert ~/.aproxy/ca.pem -x http://localhost:9090 https://httpbin.org/get
+  curl -sN http://localhost:8080/events    # request/response events should appear
+  ```
+
+  Rules only apply when the system proxy is enabled (`proxyEnabled`), so mock
+  testing needs `POST /proxy/enable` first — remember to `POST /proxy/disable`
+  afterwards.
 
 ## Benchmarking
 
@@ -418,17 +584,33 @@ In the desktop app, the UI is loaded from the app bundle via the `views://mainvi
 | **Desktop prod** | `views://mainview/index.html` | Absolute: `http://127.0.0.1:8080/...` | Yes |
 | **Desktop dev + HMR** | `http://localhost:3000` (Vite) | Vite proxy handles routing | No |
 
-### Installing unsigned builds
+### Code signing and notarization
 
-The DMG/app is currently **unsigned**. macOS Gatekeeper will show "damaged" or "unidentified developer" errors. To work around this, after mounting the DMG and copying the app:
+Signing is **driven entirely by the environment** — `electrobun.config.ts`
+derives `mac.codesign` / `mac.notarize` from the presence of credentials rather
+than hardcoding them:
+
+| Env vars present | Result |
+|---|---|
+| none | unsigned build, warning printed, DMG still produced |
+| `ELECTROBUN_DEVELOPER_ID` | signed, not notarized |
+| + `ELECTROBUN_APPLEID`, `ELECTROBUN_APPLEIDPASS`, `ELECTROBUN_TEAMID` | signed and notarized |
+
+Do not set `codesign: true` unconditionally. Electrobun aborts the whole build
+with "Env var ELECTROBUN_DEVELOPER_ID is required to codesign" when the identity
+is missing, which breaks `bun run desktop:build` for anyone without an Apple
+Developer account. Notarization also requires signing — electrobun computes
+`shouldNotarize = shouldCodesign && config.build.mac.notarize` — so partial
+credentials degrade to signed-but-not-notarized rather than failing.
+
+**Installing unsigned builds:** Gatekeeper shows "damaged" or "unidentified
+developer". After copying the app out of the DMG:
 
 ```bash
 xattr -cr /Applications/Aproxy.app
 ```
 
-### Next step: code signing and notarization
-
-To eliminate the Gatekeeper warning, enable code signing and notarization. This requires an Apple Developer Program membership ($99/yr).
+**To produce signed builds** (requires an Apple Developer Program membership):
 
 **1. Get a signing certificate:**
 - Enroll at https://developer.apple.com/programs/
@@ -436,14 +618,8 @@ To eliminate the Gatekeeper warning, enable code signing and notarization. This 
 - Or in Xcode: Settings > Accounts > Manage Certificates > "+" > Developer ID Application
 - Verify it's installed: `security find-identity -v -p codesigning` should show `"Developer ID Application: Your Name (TEAMID)"`
 
-**2. Update `electrobun.config.ts`:**
-```typescript
-mac: {
-  bundleCEF: false,
-  codesign: true,
-  notarize: true,
-},
-```
+**2. Export it and set the env vars** — no config change is needed; the build
+picks them up automatically.
 
 **3. Create an app-specific password:**
 - Go to https://appleid.apple.com/account/manage
@@ -460,37 +636,10 @@ mac: {
 | `ELECTROBUN_APPLEIDPASS` | App-specific password (from step 3) |
 | `ELECTROBUN_TEAMID` | Apple Developer Team ID |
 
-**5. Update `.github/workflows/build.yml`** to import the certificate into a temporary keychain and pass env vars:
-```yaml
-- name: Import signing certificate
-  env:
-    CERTIFICATE_P12_BASE64: ${{ secrets.CERTIFICATE_P12_BASE64 }}
-    CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
-  run: |
-    KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
-    KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
-    echo "$CERTIFICATE_P12_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
-    security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-    security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-    security import $RUNNER_TEMP/certificate.p12 \
-      -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-    security set-key-partition-list -S apple-tool:,apple:,codesign: \
-      -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-    security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
-
-- name: Build desktop app
-  run: bunx electrobun build --env=stable
-  env:
-    ELECTROBUN_DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
-    ELECTROBUN_APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
-    ELECTROBUN_APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
-    ELECTROBUN_TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
-
-- name: Clean up keychain
-  if: always()
-  run: security delete-keychain $RUNNER_TEMP/signing.keychain-db 2>/dev/null || true
-```
+**5. `.github/workflows/build.yml` already imports the certificate into a
+temporary keychain and passes these env vars through** — no workflow change is
+needed. With the secrets unset it still produces an unsigned DMG rather than
+failing, because signing is env-driven.
 
 ## Pull request / commit guidance
 
