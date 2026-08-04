@@ -1,7 +1,8 @@
 /**
- * Tests for the mitmproxy backend: binary discovery, CA export into mitmproxy's
- * confdir, backend selection, and the `/_mitm/*` bridge endpoints that carry
- * flows from the addon back into the event bus and rule sandbox.
+ * Tests for the mitmproxy engine: binary discovery, CA export into mitmproxy's
+ * confdir, port selection, the `/_mitm/*` bridge endpoints that carry flows
+ * from the addon back into the event bus and rule sandbox, and the behaviour
+ * when mitmdump is unavailable.
  *
  * These do not require mitmproxy to be installed.
  */
@@ -14,12 +15,12 @@ import { Effect } from "effect";
 import {
   DEFAULT_MITM_PORT,
   LEGACY_MITM_PORTS,
+  MitmProxyBackend,
   resolveAddonPath,
   resolveMitmdumpPath,
   resolveMitmPort,
   seedMitmConfdir,
 } from "./mitmBackend";
-import { resolveProxyBackend } from "./config";
 import { createRoutes, type MitmBridge } from "./server";
 import type { AproxyConfig } from "./config";
 import type { ProxyEvent } from "./models";
@@ -31,7 +32,6 @@ const baseConfig: AproxyConfig = {
   defaultViewId: null,
   theme: "dark",
   maxRequests: 1000,
-  proxyBackend: "builtin",
 };
 
 const tempDirs: string[] = [];
@@ -43,7 +43,6 @@ function makeTempDir(): string {
 }
 
 afterEach(() => {
-  delete process.env.APROXY_BACKEND;
   delete process.env.APROXY_MITMDUMP;
   delete process.env.APROXY_MITM_ADDON;
   delete process.env.APROXY_MITM_PORT;
@@ -58,8 +57,18 @@ function makeRoutes(options: {
   mock?: SerializedRuleResponse | null;
   ruleError?: boolean;
   bridgeEnabled?: boolean;
+  engineAvailable?: boolean;
+  engineError?: string | null;
 } = {}) {
-  const { mock = null, ruleError = false, bridgeEnabled = true } = options;
+  const {
+    mock = null,
+    ruleError = false,
+    bridgeEnabled = true,
+    engineAvailable = true,
+    engineError = null,
+  } = options;
+  const enabledPorts: number[] = [];
+  const readySignals: number[] = [];
   const events: ProxyEvent[] = [];
   const ruleContexts: unknown[] = [];
 
@@ -70,6 +79,7 @@ function makeRoutes(options: {
       ruleContexts.push(context);
       return ruleError ? Effect.fail(new Error("sandbox exploded")) : Effect.succeed(mock);
     },
+    onEngineReady: () => { readySignals.push(Date.now()); },
   };
 
   const routes = createRoutes({
@@ -78,7 +88,6 @@ function makeRoutes(options: {
     loadRules: () => Effect.void,
     scenariosDir: "/tmp/aproxy-test-scenarios",
     viewsDir: "/tmp/aproxy-test-views",
-    handleProxy: () => Effect.succeed(new Response("proxied")),
     createSse: () => new ReadableStream<string>(),
     getScenarios: () => [],
     getActiveScenarioIds: () => [],
@@ -86,11 +95,14 @@ function makeRoutes(options: {
     getViews: () => [],
     getConfig: () => baseConfig,
     updateConfig: () => {},
-    getProxyPort: () => 8081,
-    getBackend: () => "mitmproxy",
+    getProxyPort: () => DEFAULT_MITM_PORT,
+    getEngineStatus: () => ({ engineAvailable, engineError }),
     bridge: bridgeEnabled ? bridge : undefined,
-    enableProxy: () =>
-      Effect.succeed({ networkService: "Wi-Fi", proxyHost: "127.0.0.1", proxyPort: 8081, enabled: true }),
+    enableProxy: (input) =>
+      Effect.sync(() => {
+        enabledPorts.push(input.proxyPort);
+        return { networkService: "Wi-Fi", proxyHost: input.proxyHost, proxyPort: input.proxyPort, enabled: true };
+      }),
     disableProxy: () => Effect.succeed({ networkService: "Wi-Fi", enabled: false }),
     proxyStatus: () =>
       Effect.succeed({ settings: {}, raw: "", networkService: "Wi-Fi", enabled: false }),
@@ -103,7 +115,7 @@ function makeRoutes(options: {
     installCaOnSimulator: () => Effect.die("not used"),
   });
 
-  return { routes, events, ruleContexts };
+  return { routes, events, ruleContexts, enabledPorts, readySignals };
 }
 
 function bridgeRequest(path: string, body: unknown, token: string = TOKEN) {
@@ -114,26 +126,115 @@ function bridgeRequest(path: string, body: unknown, token: string = TOKEN) {
   });
 }
 
-describe("backend selection", () => {
-  test("defaults to the built-in engine", () => {
-    expect(resolveProxyBackend(baseConfig)).toBe("builtin");
+function controlRequest(path: string, init: RequestInit = {}) {
+  return new Request(`http://127.0.0.1:8080${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", host: "127.0.0.1:8080", ...(init.headers ?? {}) },
+  });
+}
+
+describe("engine availability", () => {
+  test("/host reports the proxy port and a healthy engine", async () => {
+    const { routes } = makeRoutes();
+    const response = await Effect.runPromise(routes(controlRequest("/host")));
+    const body = await response.json();
+
+    expect(body.proxyPort).toBe(DEFAULT_MITM_PORT);
+    expect(body.engineAvailable).toBe(true);
+    expect(body.engineError).toBeNull();
   });
 
-  test("persisted config selects mitmproxy", () => {
-    expect(resolveProxyBackend({ ...baseConfig, proxyBackend: "mitmproxy" })).toBe("mitmproxy");
+  test("/host surfaces why the engine is down instead of hiding it", async () => {
+    const { routes } = makeRoutes({
+      engineAvailable: false,
+      engineError: "mitmdump was not found.",
+    });
+    const response = await Effect.runPromise(routes(controlRequest("/host")));
+    const body = await response.json();
+
+    expect(body.engineAvailable).toBe(false);
+    expect(body.engineError).toBe("mitmdump was not found.");
   });
 
-  test("APROXY_BACKEND overrides the persisted config in both directions", () => {
-    process.env.APROXY_BACKEND = "mitmproxy";
-    expect(resolveProxyBackend(baseConfig)).toBe("mitmproxy");
+  test("enabling the system proxy is refused while the engine is down", async () => {
+    // Pointing macOS at a dead port takes the user's network offline, which is
+    // far worse than simply not capturing traffic.
+    const { routes, enabledPorts } = makeRoutes({
+      engineAvailable: false,
+      engineError: "mitmdump was not found.",
+    });
+    const response = await Effect.runPromise(
+      routes(controlRequest("/proxy/enable", {
+        method: "POST",
+        body: JSON.stringify({ proxyHost: "127.0.0.1" }),
+      }))
+    );
 
-    process.env.APROXY_BACKEND = "builtin";
-    expect(resolveProxyBackend({ ...baseConfig, proxyBackend: "mitmproxy" })).toBe("builtin");
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toBe("mitmdump was not found.");
+    expect(enabledPorts).toEqual([]);
   });
 
-  test("an unrecognised APROXY_BACKEND value falls back to the config", () => {
-    process.env.APROXY_BACKEND = "nonsense";
-    expect(resolveProxyBackend({ ...baseConfig, proxyBackend: "mitmproxy" })).toBe("mitmproxy");
+  test("the server picks the proxy port, ignoring whatever a stale UI sends", async () => {
+    const { routes, enabledPorts } = makeRoutes();
+    await Effect.runPromise(
+      routes(controlRequest("/proxy/enable", {
+        method: "POST",
+        body: JSON.stringify({ proxyHost: "127.0.0.1", proxyPort: 1234 }),
+      }))
+    );
+
+    expect(enabledPorts).toEqual([DEFAULT_MITM_PORT]);
+  });
+
+  test("origin-form traffic sent to the control port is rejected, not proxied", async () => {
+    // The control server never forwards traffic now, so a stale system proxy
+    // setting must fail loudly rather than hang.
+    const { routes } = makeRoutes();
+    const response = await Effect.runPromise(
+      routes(new Request("http://example.com/some/path", { headers: { host: "example.com" } }))
+    );
+
+    expect(response.status).toBe(421);
+    expect(await response.text()).toContain(String(DEFAULT_MITM_PORT));
+  });
+});
+
+describe("engine readiness", () => {
+  const makeBackend = () =>
+    new MitmProxyBackend({
+      host: "127.0.0.1",
+      port: 9090,
+      controlUrl: "http://127.0.0.1:8080",
+      bridgeToken: "token",
+      ca: {
+        keyPem: "",
+        certPem: "",
+        keyPath: "/nonexistent/ca-key.pem",
+        certPath: "/nonexistent/ca.pem",
+      },
+    });
+
+  test("a backend that was never started is not available", () => {
+    const backend = makeBackend();
+    expect(backend.running).toBe(false);
+    expect(backend.available).toBe(false);
+  });
+
+  test("a ready signal without a live process does not mark the engine available", () => {
+    // Guards the safety property behind /proxy/enable: availability must never
+    // be claimed from a stale ready signal, because pointing the macOS system
+    // proxy at a dead port takes the user's whole network offline.
+    const backend = makeBackend();
+    backend.signalReady();
+    expect(backend.available).toBe(false);
+  });
+
+  test("stopping clears the ready signal", () => {
+    const backend = makeBackend();
+    backend.signalReady();
+    backend.stop();
+    expect(backend.available).toBe(false);
   });
 });
 
@@ -279,7 +380,29 @@ describe("/_mitm bridge endpoints", () => {
     expect(events).toHaveLength(0);
   });
 
-  test("returns 404 when the built-in backend is active (no bridge wired)", async () => {
+  test("/_mitm/ready signals engine readiness without emitting an event", async () => {
+    const { routes, events, readySignals } = makeRoutes();
+    const response = await Effect.runPromise(
+      routes(bridgeRequest("/_mitm/ready", { port: DEFAULT_MITM_PORT }))
+    );
+
+    expect(response.status).toBe(204);
+    expect(readySignals).toHaveLength(1);
+    // Readiness is control-plane traffic, not something the user should see.
+    expect(events).toHaveLength(0);
+  });
+
+  test("/_mitm/ready is token-gated like the other bridge endpoints", async () => {
+    const { routes, readySignals } = makeRoutes();
+    const response = await Effect.runPromise(
+      routes(bridgeRequest("/_mitm/ready", { port: DEFAULT_MITM_PORT }, "wrong-token"))
+    );
+
+    expect(response.status).toBe(403);
+    expect(readySignals).toHaveLength(0);
+  });
+
+  test("returns 404 when no bridge is wired", async () => {
     const { routes, events } = makeRoutes({ bridgeEnabled: false });
     const response = await Effect.runPromise(
       routes(bridgeRequest("/_mitm/request", { type: "request", id: "x" }))

@@ -1,6 +1,5 @@
 import type { RulesListEvent, ViewsListEvent, SimulatorInfo, ProxyEvent } from "./models";
-import type { CaCert } from "./ca";
-import type { AproxyConfig, ProxyBackend } from "./config";
+import type { AproxyConfig } from "./config";
 import type { SerializedRuleResponse } from "./ruleSandboxTypes";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
@@ -8,7 +7,6 @@ import { existsSync, readFileSync, readdirSync, copyFileSync, mkdirSync, writeFi
 import { join, extname, basename } from "node:path";
 import { CommandError, RequestError } from "./errors";
 import { createSseStream, parseJsonBody } from "./http";
-import { createTcpProxy } from "./tcpProxy";
 
 // Resolve UI dist directory (built React app) for standalone mode.
 // In the Electrobun desktop build, the view is loaded via views:// protocol
@@ -96,26 +94,6 @@ const getPreferredHost = () => {
 };
 
 /**
- * Create the proxy server using a raw TCP listener that supports CONNECT tunneling.
- * Normal HTTP requests are handled by the provided fetchHandler.
- */
-export function createServer(
-  fetchHandler: (req: Request) => Effect.Effect<Response, RequestError>,
-  emitEvent: (event: ProxyEvent) => void,
-  ca?: CaCert
-) {
-  return Effect.try(() =>
-    createTcpProxy({
-      hostname: process.env.HOST ?? "127.0.0.1",
-      port: Number(process.env.PROXY_PORT ?? 8080),
-      fetchHandler,
-      emitEvent,
-      ca,
-    })
-  ).pipe(Effect.mapError((cause) => new RequestError({ cause })));
-}
-
-/**
  * Create the control-plane HTTP server used when the proxying itself is handled
  * by an external engine (mitmproxy). This serves the UI, the control API, the
  * SSE stream and the `/_mitm/*` bridge endpoints — but never proxies traffic,
@@ -136,6 +114,18 @@ export function createControlServer(
   ).pipe(Effect.mapError((cause) => new RequestError({ cause })));
 }
 
+/**
+ * Health of the mitmproxy engine, surfaced to the UI so a missing `mitmdump`
+ * shows up as an actionable message instead of a proxy that silently does
+ * nothing.
+ */
+export type EngineStatus = {
+  /** True once `mitmdump` is listening and ready to accept traffic. */
+  engineAvailable: boolean;
+  /** Human-readable reason the engine is unavailable, if it is. */
+  engineError: string | null;
+};
+
 /** Bridge callbacks used by the mitmproxy backend's `/_mitm/*` endpoints. */
 export type MitmBridge = {
   /** Shared secret the addon must present in `X-Aproxy-Token`. */
@@ -149,6 +139,12 @@ export type MitmBridge = {
     headers: Record<string, string>;
     body?: string;
   }) => Effect.Effect<SerializedRuleResponse | null, unknown>;
+  /**
+   * Called when the addon reports that mitmproxy's listener is bound. This is
+   * the only trustworthy readiness signal — probing the port cannot distinguish
+   * our listener from an unrelated process already holding it.
+   */
+  onEngineReady: () => void;
 };
 
 export function createRoutes(
@@ -158,7 +154,6 @@ export function createRoutes(
     loadRules: () => Effect.Effect<void, RequestError | unknown>;
     scenariosDir: string;
     viewsDir: string;
-    handleProxy: (req: Request) => Effect.Effect<Response, unknown>;
     createSse: (signal: AbortSignal) => ReadableStream<string>;
     getScenarios: () => Array<{ id: string; name: string; description?: string; rules: Array<{ id: string; name?: string; description?: string }> }>;
     getActiveScenarioIds: () => string[];
@@ -186,9 +181,8 @@ export function createRoutes(
     installCaOnSimulator: (udid: string) => Effect.Effect<SimulatorInfo, CommandError>;
     /** Port clients should point their proxy settings at. */
     getProxyPort: () => number;
-    /** Which proxy engine is currently serving traffic. */
-    getBackend: () => ProxyBackend;
-    /** Present only when the mitmproxy backend is active. */
+    /** Whether the mitmproxy engine is running, and why not if it isn't. */
+    getEngineStatus: () => EngineStatus;
     bridge?: MitmBridge;
   }
 ) {
@@ -230,6 +224,11 @@ export function createRoutes(
         const payload = yield* _(
           parseJsonBody<any>(req).pipe(Effect.mapError((cause) => new RequestError({ cause })))
         );
+
+        if (url.pathname === "/_mitm/ready") {
+          bridge.onEngineReady();
+          return new Response(null, { status: 204 });
+        }
 
         if (url.pathname === "/_mitm/request") {
           bridge.emitEvent(payload as ProxyEvent);
@@ -297,7 +296,7 @@ export function createRoutes(
         return Response.json({
           host: getPreferredHost(),
           proxyPort: deps.getProxyPort(),
-          backend: deps.getBackend(),
+          ...deps.getEngineStatus(),
         });
       }
 
@@ -506,22 +505,6 @@ export function createRoutes(
         return Response.json({ theme: deps.getConfig().theme });
       }
 
-      if (isControlRequest && url?.pathname === "/config/backend" && req.method === "PUT") {
-        const body = yield* _(
-          parseJsonBody<{ backend: ProxyBackend }>(req).pipe(
-            Effect.mapError((cause) => new RequestError({ cause }))
-          )
-        );
-        const requested: ProxyBackend = body.backend === "mitmproxy" ? "mitmproxy" : "builtin";
-        deps.updateConfig({ proxyBackend: requested });
-        // The engine is chosen at boot, so the change only takes effect on restart.
-        return Response.json({
-          proxyBackend: requested,
-          activeBackend: deps.getBackend(),
-          restartRequired: requested !== deps.getBackend(),
-        });
-      }
-
       // --- Views (custom filters) ---
       if (isControlRequest && url?.pathname === "/views" && req.method === "GET") {
         return Response.json({
@@ -616,8 +599,18 @@ export function createRoutes(
             Effect.mapError((cause) => new RequestError({ cause }))
           )
         );
-        // The server owns the port: it differs between backends, and a stale UI
-        // build must not be able to point the system proxy somewhere dead.
+        // Refuse to point the system proxy at a port nothing is listening on —
+        // that would take the user's network down rather than just failing to
+        // capture traffic.
+        const engine = deps.getEngineStatus();
+        if (!engine.engineAvailable) {
+          return Response.json(
+            { error: engine.engineError ?? "The mitmproxy engine is not running." },
+            { status: 503 }
+          );
+        }
+        // The server owns the port: a stale UI build must not be able to point
+        // the system proxy somewhere dead.
         const result = yield* _(
           deps.enableProxy({ proxyHost: body.proxyHost, proxyPort: deps.getProxyPort() }).pipe(
             Effect.mapError((cause) => new RequestError({ cause }))
@@ -637,7 +630,7 @@ export function createRoutes(
         const result = yield* _(
           deps.proxyStatus().pipe(Effect.mapError((cause) => new RequestError({ cause })))
         );
-        return Response.json({ ...result, backend: deps.getBackend(), proxyPort: deps.getProxyPort() });
+        return Response.json({ ...result, proxyPort: deps.getProxyPort(), ...deps.getEngineStatus() });
       }
 
       if (isControlRequest && url?.pathname === "/simulators" && req.method === "GET") {
@@ -730,27 +723,33 @@ export function createRoutes(
       }
 
       // If we reach here for a control-host request, it means no route matched.
-      // Return 404 instead of falling through to the proxy handler, which would
-      // create an infinite loop when the system proxy is enabled (the proxy would
-      // send the request back to itself via the system proxy).
       if (isControlRequest) {
         return new Response("Not Found", { status: 404 });
       }
 
-      return yield* _(deps.handleProxy(req));
+      // A non-control request reached the control port, which never proxies
+      // traffic. This normally means a stale system proxy setting is pointing
+      // here instead of at the mitmproxy port.
+      return new Response(
+        `aproxy control server does not proxy traffic. Point your proxy settings at port ${deps.getProxyPort()}.`,
+        { status: 421, headers: { "Content-Type": "text/plain" } }
+      );
     }).pipe(
       Effect.map((res) => _isControlRequest ? withCors(res, req) : res),
       Effect.catchAll((err) => Effect.sync(() => {
-        const message = err instanceof CommandError
-          ? err.message
-          : err instanceof RequestError
-            ? String((err as any).cause ?? err)
-            : String(err);
+        const message = describeError(err);
         console.error(`[route error] ${message}`);
         return withCors(Response.json({ error: message }, { status: 400 }), req);
       })),
     );
   };
+}
+
+/** Best-effort human-readable message for anything that reaches the route catch-all. */
+function describeError(err: unknown): string {
+  if (err instanceof CommandError) return err.message;
+  if (err instanceof RequestError) return String((err as any).cause ?? err);
+  return String(err);
 }
 
 export function createSse(

@@ -7,7 +7,8 @@
  * Architecture:
  *   1. Starts a tiny local upstream HTTP server (port 9999) so network latency
  *      is eliminated and we measure pure proxy overhead.
- *   2. Starts the aproxy server (port from PROXY_PORT or 8080).
+ *   2. Starts aproxy: control API on PROXY_PORT (8080), mitmproxy on
+ *      APROXY_MITM_PORT (9090).
  *   3. Connects an SSE listener to /events (simulates the web UI).
  *   4. Fires N requests at concurrency C through the proxy and reports stats.
  *
@@ -62,7 +63,10 @@ const RES_SIZE = BODY_SIZE >= 0 ? BODY_SIZE : flag("res-size", 0);
 const USE_HTTPS = boolFlag("https");
 const KEEPALIVE = flag("keepalive", 1); // requests per CONNECT+TLS connection
 const UPSTREAM_PORT = 9999;
-const PROXY_PORT = Number(process.env.PROXY_PORT ?? 8080);
+/** Control API + SSE stream. Never carries proxied traffic. */
+const CONTROL_PORT = Number(process.env.PROXY_PORT ?? 8080);
+/** Port mitmdump listens on — this is what the load generator talks to. */
+const PROXY_PORT = Number(process.env.APROXY_MITM_PORT ?? 9090);
 const PROXY_HOST = process.env.HOST ?? "127.0.0.1";
 
 // ---------------------------------------------------------------------------
@@ -162,15 +166,16 @@ const upstream = Bun.serve(upstreamOptions);
 // ---------------------------------------------------------------------------
 // 4. Start aproxy
 // ---------------------------------------------------------------------------
-console.log(`[bench] Starting aproxy on :${PROXY_PORT}...`);
+console.log(`[bench] Starting aproxy (control :${CONTROL_PORT}, proxy :${PROXY_PORT})...`);
 const proxyEnv: Record<string, string> = {
   ...process.env as Record<string, string>,
-  PROXY_PORT: String(PROXY_PORT),
+  PROXY_PORT: String(CONTROL_PORT),
+  APROXY_MITM_PORT: String(PROXY_PORT),
   HOST: PROXY_HOST,
 };
 if (USE_HTTPS) {
-  // The proxy needs to fetch from our self-signed upstream; skip TLS verification
-  proxyEnv.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  // mitmproxy needs to fetch from our self-signed upstream; skip verification.
+  proxyEnv.APROXY_SSL_INSECURE = "1";
 }
 const proxyProc = Bun.spawn(["bun", "src/index.ts"], {
   cwd: import.meta.dir + "/..",
@@ -179,18 +184,25 @@ const proxyProc = Bun.spawn(["bun", "src/index.ts"], {
   stderr: "pipe",
 });
 
-async function waitForProxy(timeoutMs = 10_000): Promise<void> {
+async function waitForProxy(timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let lastError = "control server did not respond";
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://${PROXY_HOST}:${PROXY_PORT}/ca/status`);
-      if (res.ok) return;
+      const res = await fetch(`http://${PROXY_HOST}:${CONTROL_PORT}/host`);
+      if (res.ok) {
+        // The control server comes up before mitmdump finishes binding, so wait
+        // for the engine itself rather than just the API.
+        const body = await res.json() as { engineAvailable?: boolean; engineError?: string | null };
+        if (body.engineAvailable === true) return;
+        lastError = body.engineError ?? "mitmproxy engine is not available";
+      }
     } catch {
       // not ready yet
     }
     await Bun.sleep(100);
   }
-  throw new Error("Proxy did not start within timeout");
+  throw new Error(`Proxy did not start within timeout: ${lastError}`);
 }
 
 await waitForProxy();
@@ -204,9 +216,9 @@ let sseBytesReceived = 0;
 const sseAbort = new AbortController();
 
 const ssePromise = new Promise<void>((resolve) => {
-  const sseSocket = netConnect(PROXY_PORT, PROXY_HOST, () => {
+  const sseSocket = netConnect(CONTROL_PORT, PROXY_HOST, () => {
     sseSocket.write(
-      `GET /events HTTP/1.1\r\nHost: ${PROXY_HOST}:${PROXY_PORT}\r\nAccept: text/event-stream\r\nConnection: keep-alive\r\n\r\n`
+      `GET /events HTTP/1.1\r\nHost: ${PROXY_HOST}:${CONTROL_PORT}\r\nAccept: text/event-stream\r\nConnection: keep-alive\r\n\r\n`
     );
   });
   let buf = "";

@@ -36,24 +36,32 @@ export async function disableProxy(): Promise<{ enabled: boolean }> {
 export type ProxyTarget = {
   host: string;
   proxyPort: number;
-  backend: "builtin" | "mitmproxy";
+  /** False when mitmproxy isn't running, in which case no traffic is captured. */
+  engineAvailable: boolean;
+  /** Why the engine is unavailable, suitable for showing to the user. */
+  engineError: string | null;
 };
 
 /**
  * Address clients should point their proxy settings at. The port is owned by
- * the server because it differs per backend (the mitmproxy engine listens on
- * its own port, separate from the control API).
+ * the server: mitmproxy listens on its own port, separate from the control API.
  */
 export async function getProxyTarget(): Promise<ProxyTarget> {
   try {
     const data = await fetchJson<Partial<ProxyTarget>>("/host");
     return {
       host: data.host || "127.0.0.1",
-      proxyPort: data.proxyPort ?? 8080,
-      backend: data.backend ?? "builtin",
+      proxyPort: data.proxyPort ?? 9090,
+      engineAvailable: data.engineAvailable ?? false,
+      engineError: data.engineError ?? null,
     };
   } catch {
-    return { host: "127.0.0.1", proxyPort: 8080, backend: "builtin" };
+    return {
+      host: "127.0.0.1",
+      proxyPort: 9090,
+      engineAvailable: false,
+      engineError: "Could not reach the aproxy control server.",
+    };
   }
 }
 

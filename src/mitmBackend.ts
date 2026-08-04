@@ -47,6 +47,12 @@ export const DEFAULT_MITM_PORT = 9090;
  */
 export const LEGACY_MITM_PORTS = [8081];
 
+/**
+ * How long to wait for mitmdump to report ready. Generous because the first
+ * run pays for Python startup plus mitmproxy's certificate setup.
+ */
+const READY_TIMEOUT_MS = 30_000;
+
 /** Port `mitmdump` should listen on, honouring `APROXY_MITM_PORT`. */
 export function resolveMitmPort(): number {
   const raw = process.env.APROXY_MITM_PORT;
@@ -112,11 +118,24 @@ export class MitmProxyBackend {
   private proc: ReturnType<typeof Bun.spawn> | null = null;
   private stopping = false;
   private lastExitCode: number | null = null;
+  private ready: Promise<void> = Promise.resolve();
+  private markReady: () => void = () => {};
+  private readySignalled = false;
 
   constructor(private readonly options: MitmBackendOptions) {}
 
   get running(): boolean {
     return this.proc !== null && this.proc.exitCode === null;
+  }
+
+  /**
+   * Whether the proxy port is actually accepting traffic. `running` alone is
+   * not enough: mitmdump spends seconds booting Python before it binds, so a
+   * live process does not imply a live listener. Callers that would send the
+   * user's traffic at the port (notably `/proxy/enable`) must use this.
+   */
+  get available(): boolean {
+    return this.running && this.readySignalled;
   }
 
   get port(): number {
@@ -168,11 +187,20 @@ export class MitmProxyBackend {
         "--scripts", addon,
       ];
 
+      // Opt-in escape hatch for upstreams with self-signed certificates (the
+      // benchmark harness, local dev servers). Off by default so real traffic
+      // is always verified.
+      if (process.env.APROXY_SSL_INSECURE === "1") {
+        args.push("--ssl-insecure");
+      }
+
       yield* _(
         Effect.try({
           try: () => {
             this.stopping = false;
             this.lastExitCode = null;
+            this.readySignalled = false;
+            this.ready = new Promise<void>((resolve) => { this.markReady = resolve; });
             this.proc = Bun.spawn([binary, ...args], {
               stdout: "pipe",
               stderr: "pipe",
@@ -201,15 +229,22 @@ export class MitmProxyBackend {
         })
       );
 
-      yield* _(this.waitUntilListening());
+      yield* _(this.waitUntilReady());
       console.log(`[mitmproxy] ${binary} listening on ${this.options.host}:${this.options.port}`);
     });
+  }
+
+  /** Called by the `/_mitm/ready` bridge endpoint when the addon reports in. */
+  signalReady(): void {
+    this.readySignalled = true;
+    this.markReady();
   }
 
   /** Terminate the subprocess. Safe to call when it is not running. */
   stop(): void {
     if (!this.proc) return;
     this.stopping = true;
+    this.readySignalled = false;
     try {
       this.proc.kill();
     } catch {
@@ -218,33 +253,35 @@ export class MitmProxyBackend {
     this.proc = null;
   }
 
-  private waitUntilListening(): Effect.Effect<void, MitmBackendError> {
-    const { host, port } = this.options;
+  /**
+   * Wait for the addon's `running` hook to report in. mitmdump exits before
+   * that hook fires when it cannot bind, so this distinguishes "our proxy is
+   * up" from "some other process already owns the port" — a TCP probe cannot.
+   */
+  private waitUntilReady(): Effect.Effect<void, MitmBackendError> {
     return Effect.tryPromise({
       try: async () => {
-        const deadline = Date.now() + 15_000;
-        const probeHost = host === "0.0.0.0" ? "127.0.0.1" : host;
+        const deadline = Date.now() + READY_TIMEOUT_MS;
         while (Date.now() < deadline) {
           if (this.proc === null) {
             throw new Error(
               `mitmdump exited during startup (code ${this.lastExitCode ?? "unknown"})`
             );
           }
-          try {
-            const socket = await Bun.connect({
-              hostname: probeHost,
-              port,
-              socket: { data() {}, error() {} },
-            });
-            socket.end();
-            return;
-          } catch {
-            await Bun.sleep(100);
-          }
+          const outcome = await Promise.race([
+            this.ready.then(() => "ready" as const),
+            Bun.sleep(200).then(() => "waiting" as const),
+          ]);
+          if (outcome === "ready") return;
         }
-        throw new Error(`mitmdump did not start listening on ${probeHost}:${port} within 15s`);
+        throw new Error(
+          `mitmdump did not report ready within ${READY_TIMEOUT_MS / 1000}s`
+        );
       },
-      catch: (cause) => new MitmBackendError({ reason: String(cause) }),
+      catch: (cause) =>
+        new MitmBackendError({
+          reason: cause instanceof Error ? cause.message : String(cause),
+        }),
     });
   }
 

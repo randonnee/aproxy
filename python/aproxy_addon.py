@@ -267,6 +267,15 @@ class AproxyBridge:
         self._self_warned: set = set()
         threading.Thread(target=_watch_parent, name="aproxy-parent-watch", daemon=True).start()
 
+    def running(self) -> None:
+        """
+        Fired only once mitmproxy's listener is actually bound — if the port is
+        taken, mitmdump logs the bind error and exits before reaching this.
+        The supervisor waits for this signal instead of probing the port, which
+        cannot tell our listener apart from an unrelated process squatting on it.
+        """
+        self._events.send("/_mitm/ready", {"port": LISTEN_PORT})
+
     def _reject_self_request(self, flow: http.HTTPFlow) -> None:
         """Answer a request aimed at our own port without reporting it."""
         path = flow.request.path.split("?", 1)[0]

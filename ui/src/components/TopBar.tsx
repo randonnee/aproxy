@@ -15,6 +15,9 @@ export function TopBar() {
   const [target, setTarget] = useState<api.ProxyTarget | null>(null);
 
   const count = orderedIds.length;
+  // mitmproxy is a required dependency; if it isn't running we can't capture
+  // anything, and enabling the system proxy would point macOS at a dead port.
+  const engineDown = target !== null && !target.engineAvailable;
 
   useEffect(() => {
     api.getProxyTarget().then(setTarget).catch(() => { });
@@ -51,14 +54,22 @@ export function TopBar() {
         <button
           className={`proxy-btn ${proxyEnabled && connected ? "active" : ""}`}
           onClick={handleToggleProxy}
-          disabled={busy || !connected}
+          disabled={busy || !connected || engineDown}
+          title={engineDown ? target!.engineError ?? undefined : undefined}
         >
-          <span className={`proxy-dot ${proxyEnabled && connected ? "on" : ""} ${!connected ? "disconnected" : ""}`} />
-          {!connected ? "Disconnected" : proxyEnabled ? "Listening" : "Ready"}
+          <span
+            className={`proxy-dot ${proxyEnabled && connected && !engineDown ? "on" : ""} ${!connected || engineDown ? "disconnected" : ""}`}
+          />
+          {!connected
+            ? "Disconnected"
+            : engineDown
+              ? "mitmproxy unavailable"
+              : proxyEnabled
+                ? "Listening"
+                : "Ready"}
           {connected && target && (
             <sub className="proxy-address">
-              on {target.host}:{target.proxyPort}
-              {target.backend === "mitmproxy" ? " · mitmproxy" : ""}
+              {engineDown ? target.engineError : `on ${target.host}:${target.proxyPort}`}
             </sub>
           )}
         </button>

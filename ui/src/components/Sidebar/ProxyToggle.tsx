@@ -12,6 +12,8 @@ export function ProxyToggle() {
     api.getProxyTarget().then(setTarget).catch(() => {});
   }, []);
 
+  const engineDown = target !== null && !target.engineAvailable;
+
   const handleToggle = async () => {
     setBusy(true);
     try {
@@ -32,14 +34,18 @@ export function ProxyToggle() {
   return (
     <div className="sidebar-section">
       <div className="sidebar-title">System Proxy</div>
-      {target && (
+      {target && !engineDown && (
         <div className="proxy-address">{target.host}:{target.proxyPort}</div>
+      )}
+      {engineDown && (
+        <div className="proxy-warning">{target!.engineError}</div>
       )}
       <div className="proxy-toggle">
         <button
           className={proxyEnabled ? "danger" : "primary"}
           onClick={handleToggle}
-          disabled={busy}
+          disabled={busy || engineDown}
+          title={engineDown ? target!.engineError ?? undefined : undefined}
         >
           {proxyEnabled ? "Disable Proxy" : "Enable Proxy"}
         </button>

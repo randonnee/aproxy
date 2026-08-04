@@ -1,66 +1,71 @@
 # aproxy
 
-Local HTTP/HTTPS proxy built with Bun. Intercepts traffic on macOS with MITM SSL decryption, displays requests in a React web UI, and supports rule-based response mocking.
+Local HTTP/HTTPS proxy built with Bun. Intercepts traffic on macOS with MITM SSL
+decryption, displays requests in a React web UI, and supports rule-based response
+mocking.
+
+Traffic is proxied by [mitmproxy](https://mitmproxy.org/); aproxy supervises it,
+bridges its flows into a React UI, and layers on scenarios, views and macOS
+certificate/proxy management.
 
 ## Quick start
 
+mitmproxy is a required dependency:
+
 ```bash
+brew install mitmproxy      # or: pipx install mitmproxy
 bun install
 bun run dev
 ```
 
-Default port:
+Default ports:
 
-- Proxy + control server: `8080`
+- Control server (UI, API, SSE): `8080`
+- Proxy (mitmdump): `9090`
 
 Override with env vars:
 
 ```bash
-PROXY_PORT=8888 bun run dev
+PROXY_PORT=8888 APROXY_MITM_PORT=9999 bun run dev
 ```
 
-## Proxy backends
+If `mitmdump` is missing, aproxy still starts: the UI loads and reports the
+problem, CA and simulator management keep working, and enabling the system proxy
+is blocked so macOS is never pointed at a dead port.
 
-aproxy can drive traffic through one of two interchangeable engines. Everything
-above the transport — the SSE event contract, the React UI, scenarios, views and
-the rule sandbox — is identical either way.
+## Proxy engine
 
-| | `builtin` (default) | `mitmproxy` |
-|---|---|---|
-| Engine | hand-rolled `Bun.listen` TCP proxy (`tcpProxy.ts` / `mitm.ts` / `tunnel.ts`) | supervised `mitmdump` subprocess + `python/aproxy_addon.py` |
-| Ports | proxy **and** control API on `8080` | control API on `8080`, proxy on `9090` |
-| Extra install | none | `brew install mitmproxy` |
-| HTTP/2, HTTP/3, protocol edge cases | HTTP/1.1 only (ALPN pinned) | handled by mitmproxy |
-
-Select the engine with the `APROXY_BACKEND` env var (which wins over config), or
-persist it in `~/.aproxy/config.json` as `"proxyBackend"`:
-
-```bash
-bun run start:mitm                       # same as APROXY_BACKEND=mitmproxy bun run start
-APROXY_BACKEND=builtin bun run start     # force the built-in engine
-```
-
-```bash
-curl -X PUT localhost:8080/config/backend \
-  -H 'Content-Type: application/json' -d '{"backend":"mitmproxy"}'   # takes effect on restart
-```
-
-If `mitmproxy` is selected but `mitmdump` cannot be found, aproxy logs install
-instructions and falls back to the built-in engine rather than failing to start.
+Traffic is handled by a supervised `mitmdump` subprocess. aproxy owns the
+control plane — UI, API, SSE, scenarios, views and the rule sandbox — and talks
+to mitmproxy through `python/aproxy_addon.py`.
 
 Relevant env vars:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `APROXY_BACKEND` | config / `builtin` | `builtin` or `mitmproxy` |
+| `PROXY_PORT` | `8080` | control server port (UI, API, SSE) |
 | `APROXY_MITM_PORT` | `9090` | port mitmproxy listens on |
 | `APROXY_MITMDUMP` | auto-discovered | explicit path to the `mitmdump` binary |
 | `APROXY_MITM_ADDON` | `python/aproxy_addon.py` | explicit path to the bridge addon |
+| `APROXY_SSL_INSECURE` | unset | `1` skips upstream TLS verification (self-signed dev servers, benchmarks) |
 
 The UI never hardcodes the proxy port — it reads `GET /host`, which reports
-`{ host, proxyPort, backend }` for whichever engine is running.
+`{ host, proxyPort, engineAvailable, engineError }`.
 
-### How the mitmproxy backend works
+`mitmdump` is discovered via `APROXY_MITMDUMP`, then `PATH`, then a list of
+known Homebrew locations. The fallback list matters: a GUI-launched macOS app
+inherits launchd's `PATH`, which excludes Homebrew.
+
+### Why the proxy port is 9090
+
+The obvious default of `PROXY_PORT + 1` (8081) is React Native Metro's port.
+Binding it steals the port from Metro, and every RN app on the machine —
+including inside the iOS simulators aproxy targets — polls
+`localhost:8081/inspector/device` about once a second, flooding the UI. Requests
+addressed to the proxy's own host:port are answered with `421 Misdirected
+Request` and never reported as traffic; other localhost ports proxy normally.
+
+### How it works
 
 ```
 client ──▶ mitmdump :9090 (aproxy_addon.py)
@@ -74,6 +79,9 @@ client ──▶ mitmdump :9090 (aproxy_addon.py)
 
 - Only `/_mitm/request` blocks the flow; all other events are queued onto a
   background thread in the addon so mitmproxy's event loop is never stalled.
+- The addon posts `/_mitm/ready` from mitmproxy's `running` hook. That is the
+  readiness signal aproxy waits for — probing the port cannot tell our listener
+  apart from an unrelated process already squatting on it.
 - The bridge endpoints are loopback-only and gated on a per-run token
   (`X-Aproxy-Token`) generated at startup.
 - mitmproxy reuses the **existing aproxy CA**: `mitmBackend.ts` writes the
@@ -84,30 +92,25 @@ client ──▶ mitmdump :9090 (aproxy_addon.py)
 
 ## Architecture
 
-The built-in backend runs a single raw TCP listener (`Bun.listen`) on port 8080 that handles both HTTP proxy requests and HTTPS CONNECT tunneling with MITM SSL decryption.
-
-- **HTTP requests** are parsed and dispatched through an Effect-based route handler (control routes and upstream proxy).
-- **CONNECT requests** are intercepted via MITM: an ephemeral TLS server is started with a per-host certificate signed by the auto-generated CA. Decrypted traffic flows through the same proxy/rules pipeline as HTTP and appears in the web UI. A blind tunnel fallback is used when no CA is configured.
+`Bun.serve` on port 8080 runs the control plane only — it never forwards
+traffic. `mitmdump` owns port 9090 and does all the proxying, including CONNECT
+tunnelling and TLS interception using aproxy's CA.
 
 ### Backend (`src/`)
 
-- `src/index.ts` — entry point, wires dependencies, selects the proxy backend
-- `src/tcpProxy.ts` — raw TCP listener, HTTP parsing, CONNECT detection
-- `src/tunnel.ts` — CONNECT tunnel handler (blind TCP pipe fallback via `Bun.connect`)
-- `src/mitm.ts` — MITM tunnel handler (TLS termination, decrypted HTTP parsing, proxy pipeline reuse)
-- `src/mitmBackend.ts` — mitmproxy backend: `mitmdump` discovery, CA export, subprocess supervision
+- `src/index.ts` — entry point, wires dependencies, supervises the engine
+- `src/mitmBackend.ts` — `mitmdump` discovery, CA export, subprocess supervision, readiness
 - `python/aproxy_addon.py` — mitmproxy addon bridging flows to the control server
-- `src/ca.ts` — CA key/cert generation, per-host leaf cert signing with SAN extensions
-- `src/server.ts` — route definitions (control API + proxy dispatch), the control-only `Bun.serve` server, CORS headers for cross-origin desktop requests
-- `src/proxy.ts` — HTTP proxy forwarding with rule evaluation
-- `src/http.ts` — SSE stream creation, header utilities
+- `src/ca.ts` — root CA key/cert generation (mitmproxy derives leaf certs from it)
+- `src/server.ts` — route definitions, the control-only `Bun.serve` server, `/_mitm/*` bridge endpoints, CORS headers for cross-origin desktop requests
+- `src/http.ts` — SSE stream creation, JSON body parsing
 - `src/simulators.ts` — iOS simulator listing, cert install, host proxy config, CA trust. All functions return `Effect<T, CommandError>`
 - `src/eventBus.ts` — generic pub/sub for SSE events
 - `src/models.ts` — TypeScript event/model types
 - `src/rules.ts` — rule and view type definitions (`ScenarioFactory`, `ViewFactory`, etc.)
 - `src/rulesLoader.ts` — scenario and view file loading from separate directories, hot-reload watching
 - `src/errors.ts` — tagged error types (Effect-TS): `CommandError`, `RequestError`, `ProxyError`, `CertError`, `RulesLoadError`, `MitmBackendError`
-- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId`, `theme` and `proxyBackend`
+- `src/config.ts` — user config (`~/.aproxy/config.json`) load/save, stores `defaultViewId`, `theme` and `maxRequests`
 - `src/ui.html` — legacy single-page web UI (fallback if React build is missing)
 
 ### Web UI (`ui/`)
@@ -135,6 +138,7 @@ Key files:
 - `~/.aproxy/config.json` — user config (defaultViewId, theme)
 - `~/.aproxy/scenarios/` — user scenario files (loaded at runtime)
 - `~/.aproxy/views/` — user view files (loaded at runtime)
+- `~/.aproxy/mitmproxy/` — mitmproxy confdir, seeded with the aproxy CA
 
 ## Events (SSE)
 
@@ -142,9 +146,9 @@ The proxy exposes Server-Sent Events at `GET /events`.
 
 Event types (in the JSON `data` payload):
 
-- `request` — an HTTP or CONNECT request was received
-- `response` — upstream response (or tunnel established)
-- `error` — proxy or tunnel error
+- `request` — an HTTP request was received (HTTPS after MITM decryption)
+- `response` — upstream response
+- `error` — proxy error
 - `rules_list` — current rules and active rule IDs
 - `simulators_list` — available iOS simulators
 - `simulator_configured` — simulator cert installed
@@ -298,8 +302,11 @@ Enable system proxy:
 ```bash
 curl -s -X POST http://localhost:8080/proxy/enable \
   -H "Content-Type: application/json" \
-  -d '{"proxyHost":"10.0.0.224","proxyPort":8080}'
+  -d '{"proxyHost":"10.0.0.224"}'
 ```
+
+The server picks the port (mitmproxy's, not the control server's) and refuses
+with `503` when the engine is not running.
 
 Check proxy status:
 
@@ -379,10 +386,11 @@ curl -s -X PUT http://localhost:8080/views/default \
   -d '{"viewId":"errors-only"}'
 ```
 
-Test HTTPS interception (MITM):
+Test HTTPS interception (MITM) — note the proxy port, not the control port:
 
 ```bash
-curl -x http://localhost:8080 --cacert ~/.aproxy/ca.pem https://httpbin.org/get
+curl -x http://localhost:9090 http://httpbin.org/get
+curl -x http://localhost:9090 --cacert ~/.aproxy/ca.pem https://httpbin.org/get
 ```
 
 ## Error handling
@@ -436,6 +444,6 @@ xattr -cr /Applications/Aproxy.app
 ## Notes
 
 - HTTP proxy and HTTPS MITM interception are fully supported.
-- HTTPS traffic is decrypted via per-host certificates signed by an auto-generated CA. Decrypted requests flow through the same rule pipeline as HTTP and appear in the web UI.
+- HTTPS traffic is decrypted by mitmproxy using per-host certificates derived from aproxy's CA. Decrypted requests flow through the same rule pipeline as HTTP and appear in the web UI.
 - The CA must be trusted on the host (`POST /ca/trust`) and on any iOS simulators (`POST /simulators/trust-ca`) for TLS to succeed without errors.
-- The blind tunnel (`src/tunnel.ts`) is used as a fallback when no CA is configured.
+- `mitmdump` never outlives aproxy: the supervisor stops it on shutdown, and the addon runs a watchdog thread that exits when it is reparented, covering `SIGKILL` and host runtimes that swallow signals.

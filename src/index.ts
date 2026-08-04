@@ -5,7 +5,7 @@ import type { CaCert } from "./ca";
 import type { SerializedRuleResponse } from "./ruleSandboxTypes";
 import { EventBus } from "./eventBus";
 import { ProxyError } from "./errors";
-import { createRoutes, createServer, createControlServer, createSse, type MitmBridge } from "./server";
+import { createRoutes, createControlServer, createSse, type MitmBridge, type EngineStatus } from "./server";
 import {
   configureHostProxy,
   disableHostProxy,
@@ -18,9 +18,8 @@ import {
   isCaInstalledOnSimulator,
 } from "./simulators";
 import { loadScenarios, loadViews, watchDir } from "./rulesLoader";
-import { handleHttpProxy } from "./proxy";
 import { ensureCa } from "./ca";
-import { loadConfig, saveConfig, resolveProxyBackend, type AproxyConfig } from "./config";
+import { loadConfig, saveConfig, type AproxyConfig } from "./config";
 import { existsSync } from "node:fs";
 import {
   MitmProxyBackend,
@@ -35,12 +34,12 @@ import { homedir } from "node:os";
 import { RuleSandbox } from "./ruleSandbox";
 
 /**
- * Control server port: serves the UI, control API and SSE stream.  With the
- * built-in backend this is also the proxy port; with the mitmproxy backend the
- * proxy lives on `mitmPort` instead.
+ * Control server port: serves the UI, control API and SSE stream. Traffic
+ * proxying is handled entirely by mitmdump, which listens on `proxyPort`.
  */
 const controlPort = Number(process.env.PROXY_PORT ?? 8080);
-const mitmPort = resolveMitmPort();
+/** Port clients must point their proxy settings at. */
+const proxyPort = resolveMitmPort();
 const bindHost = process.env.HOST ?? "127.0.0.1";
 const eventBus = new EventBus<ProxyEvent | RulesListEvent | ViewsListEvent | SimulatorEvent>();
 let loadedScenarios: LoadedScenario[] = [];
@@ -48,14 +47,40 @@ let activeScenarioIds: string[] = [];
 let loadedViews: LoadedView[] = [];
 let proxyEnabled = false;
 let config: AproxyConfig = loadConfig();
-let backend = resolveProxyBackend(config);
-/** Port clients must point their proxy settings at for the active backend. */
-let proxyPort = backend === "mitmproxy" ? mitmPort : controlPort;
+/**
+ * Why the mitmproxy engine could not be started, if it couldn't. While this is
+ * set the control API and UI still work (so the user can manage CA trust and
+ * read the error), but no traffic flows.
+ */
+let engineError: string | null = null;
 const aproxyDir = join(homedir(), ".aproxy");
 const scenariosDir = join(aproxyDir, "scenarios");
 const viewsDir = join(aproxyDir, "views");
 const ruleSandbox = new RuleSandbox();
 let mitmBackend: MitmProxyBackend | null = null;
+
+/**
+ * Live health of the proxy engine. Derived from the subprocess rather than
+ * cached at startup, so a mitmdump that dies mid-session is reported honestly
+ * instead of leaving the UI claiming traffic is being captured.
+ *
+ * Uses `available` (process alive *and* listener bound) rather than `running`,
+ * because mitmdump takes seconds to boot Python before it binds. Reporting
+ * available too early would let the UI point the macOS system proxy at a port
+ * nothing is listening on yet, which takes the user's network offline.
+ */
+function engineStatus(): EngineStatus {
+  if (engineError !== null) return { engineAvailable: false, engineError };
+  if (!mitmBackend?.available) {
+    return {
+      engineAvailable: false,
+      engineError: mitmBackend?.running
+        ? "mitmproxy is still starting up."
+        : "mitmproxy stopped unexpectedly. Restart aproxy to recover.",
+    };
+  }
+  return { engineAvailable: true, engineError: null };
+}
 
 /**
  * Synchronously disable the host proxy settings.
@@ -118,11 +143,9 @@ function cleanupStaleProxy(): Effect.Effect<void, never> {
     Effect.flatMap((result) => {
       if (!result.enabled) return Effect.void;
       const port = result.settings["HTTPPort"] || result.settings["HTTPSPort"];
-      // Either backend's port counts — the user may have switched backends
-      // between runs, leaving the system pointed at the other one. Ports used
-      // by older versions are included so an upgrade never strands the system
-      // proxy on a port nothing listens to any more.
-      const ours = [controlPort, mitmPort, ...LEGACY_MITM_PORTS];
+      // Ports used by older versions are included too, so an upgrade never
+      // strands the system proxy on a port nothing listens to any more.
+      const ours = [controlPort, proxyPort, ...LEGACY_MITM_PORTS];
       if (port && ours.includes(Number(port))) {
         console.log("Detected stale proxy settings from a previous session, disabling...");
         return disableHostProxy().pipe(Effect.asVoid);
@@ -206,8 +229,6 @@ const applyRules = (context: { id: string; url: string; method: string; headers:
     Effect.map((serialized) => (serialized ? ruleSandbox.deserializeResponse(serialized) : null))
   );
 
-const handleProxy = (req: Request) => handleHttpProxy(req, (event) => eventBus.emit(event), applyRules);
-
 const main = Effect.gen(function* (_) {
   installShutdownHandlers();
 
@@ -219,32 +240,28 @@ const main = Effect.gen(function* (_) {
   const ca: CaCert = yield* _(ensureCa());
 
   // Pre-flight: mitmproxy needs both an external binary and the bundled Python
-  // bridge addon. If either is missing, say why and fall back to the built-in
-  // engine — a packaging mistake must not stop the app from starting.
-  if (backend === "mitmproxy") {
-    const missing =
-      resolveMitmdumpPath() === null
-        ? `mitmdump was not found. ${MITMPROXY_INSTALL_HINT}`
-        : !existsSync(resolveAddonPath())
-          ? `bridge addon missing at ${resolveAddonPath()}. Set APROXY_MITM_ADDON to its location.`
-          : null;
+  // bridge addon. If either is missing we still start the control server so the
+  // UI can explain the problem and CA/simulator management keeps working — a
+  // missing dependency must not stop the app from launching.
+  engineError =
+    resolveMitmdumpPath() === null
+      ? `mitmdump was not found. ${MITMPROXY_INSTALL_HINT}`
+      : !existsSync(resolveAddonPath())
+        ? `mitmproxy bridge addon missing at ${resolveAddonPath()}. Set APROXY_MITM_ADDON to its location.`
+        : null;
 
-    if (missing !== null) {
-      console.error(`[mitmproxy] ${missing}`);
-      console.error("[mitmproxy] Falling back to the built-in proxy backend.");
-      backend = "builtin";
-      proxyPort = controlPort;
-    }
+  if (engineError !== null) {
+    console.error(`[mitmproxy] ${engineError}`);
+    console.error("[mitmproxy] Starting the control server anyway — no traffic will be proxied.");
   }
 
-  const useMitmproxy = backend === "mitmproxy";
-  const bridge: MitmBridge | undefined = useMitmproxy
-    ? {
-        token: crypto.randomUUID(),
-        emitEvent: (event) => eventBus.emit(event),
-        applyRuleMock: applyRulesSerialized,
-      }
-    : undefined;
+  const bridge: MitmBridge = {
+    token: crypto.randomUUID(),
+    emitEvent: (event) => eventBus.emit(event),
+    applyRuleMock: applyRulesSerialized,
+    // `mitmBackend` is assigned below; the closure reads it at call time.
+    onEngineReady: () => mitmBackend?.signalReady(),
+  };
 
   const loadScenariosEffect = loadScenarios(
     scenariosDir,
@@ -261,7 +278,6 @@ const main = Effect.gen(function* (_) {
     loadRules: () => loadAllRules,
     scenariosDir,
     viewsDir,
-    handleProxy,
     createSse: (signal) => createSse(eventBus, listRulesEvent, listViewsEvent, signal),
     getActiveScenarioIds: () => activeScenarioIds,
     setActiveScenarioIds,
@@ -276,7 +292,7 @@ const main = Effect.gen(function* (_) {
     getConfig,
     updateConfig,
     getProxyPort: () => proxyPort,
-    getBackend: () => backend,
+    getEngineStatus: engineStatus,
     bridge,
     enableProxy: (input) => configureHostProxy(input).pipe(
       Effect.tap(() => Effect.sync(() => { proxyEnabled = true; }))
@@ -338,19 +354,30 @@ const main = Effect.gen(function* (_) {
       ),
   });
 
-  if (useMitmproxy) {
-    // Control plane only — mitmdump owns the proxy port.
-    yield* _(createControlServer(routes, { hostname: bindHost, port: controlPort }));
+  // Control plane only — mitmdump owns the proxy port.
+  yield* _(createControlServer(routes, { hostname: bindHost, port: controlPort }));
+
+  if (engineError === null) {
     mitmBackend = new MitmProxyBackend({
       host: bindHost,
-      port: mitmPort,
+      port: proxyPort,
       controlUrl: `http://127.0.0.1:${controlPort}`,
-      bridgeToken: bridge!.token,
+      bridgeToken: bridge.token,
       ca,
     });
-    yield* _(mitmBackend.start());
-  } else {
-    yield* _(createServer(routes, (event) => eventBus.emit(event), ca));
+    // A failure here (port in use, mitmdump crash on boot) is reported through
+    // the control API rather than killing the process, so the UI still loads.
+    yield* _(
+      mitmBackend.start().pipe(
+        Effect.catchAll((cause) =>
+          Effect.sync(() => {
+            mitmBackend = null;
+            engineError = `mitmproxy failed to start: ${cause.message}`;
+            console.error(`[mitmproxy] ${engineError}`);
+          })
+        )
+      )
+    );
   }
 
   // Load rules and set up file watchers (non-blocking for proxy operation)
@@ -368,14 +395,15 @@ const main = Effect.gen(function* (_) {
   yield* _(watchDir(scenariosDir, emitReload));
   yield* _(watchDir(viewsDir, emitReload));
 
-  if (useMitmproxy) {
-    console.log(`Control API on :${controlPort} — proxy on :${proxyPort} (mitmproxy backend)`);
+  const status = engineStatus();
+  if (status.engineAvailable) {
+    console.log(`Control API on :${controlPort} — proxy on :${proxyPort}`);
   } else {
-    console.log(`Proxy listening on :${proxyPort} (built-in backend, MITM enabled)`);
+    console.log(`Control API on :${controlPort} — proxy unavailable (${status.engineError})`);
   }
 });
 
-/** Start the proxy server (CA + TCP listener + rules + watchers). */
+/** Start the control server, mitmproxy engine, rules and watchers. */
 export function startProxy() {
   return Effect.runPromise(main);
 }
